@@ -14,6 +14,7 @@ const FAMILIES = {
   marks: [...'§¶¤°¿¡«»†‡⌘∿≋⌀⌇⌁⌂⌬'],
 };
 const NEEDED = 36; // 26 letters + 10 digits
+export const SYMBOLS = Object.values(FAMILIES).flat(); // every glyph (a jam's random picks come from here)
 
 let current = FAMILIES.ascii; // this session's glyphs (also used for the scramble effect)
 

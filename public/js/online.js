@@ -24,8 +24,9 @@ function clientId() {
 
 // handlers.message(msg) gets every message from the room;
 // handlers.status('connected' | 'reconnecting' | 'full') reports the connection.
-// mode = 'duet' or 'party' — only used if this is a brand-new room.
-export function connect(code, handlers, mode = 'duet') {
+// mode = 'duet' · 'party' · 'jam' — only used if this is a brand-new room.
+// role = 'screen' for a jam's shared screen (it watches; it isn't a player).
+export function connect(code, handlers, mode = 'duet', role = '') {
   const id = clientId();
   let ws = null;
   let stopped = false;
@@ -33,7 +34,7 @@ export function connect(code, handlers, mode = 'duet') {
 
   const open = () => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/api/room/${code}/ws?id=${id}&mode=${mode}`);
+    ws = new WebSocket(`${proto}://${location.host}/api/room/${code}/ws?id=${id}&mode=${mode}${role ? `&role=${role}` : ''}`);
     ws.onopen = () => {
       retries = 0;
       handlers.status('connected');

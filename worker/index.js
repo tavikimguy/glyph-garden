@@ -12,9 +12,13 @@ export { WordLog };
 // per round). A round ends — and everyone dances — once every person in the room has
 // at least one line in it, or 30 s after it began if someone's gone quiet.
 // 3 rounds for up to 4 people, 2 for bigger parties.
+// A jam: one shared screen (not a player) + up to 8 phones. Each phone picks 4 glyphs,
+// then taps them as fast as they like for 90 s; the screen plays along and, at the end,
+// turns everyone's recorded taps into a song.
 const MODES = {
   duet: { seats: 2, perPlayer: 4 },
   party: { seats: 8, perRound: 2, roundTimeout: 30_000 },
+  jam: { seats: 8, length: 90_000, maxTaps: 4000, minGap: 70 },
 };
 const partyRounds = (people) => (people <= 4 ? 3 : 2);
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
@@ -65,7 +69,7 @@ export class Room extends DurableObject {
       seed: Math.floor(Math.random() * 2 ** 31),
       players: Array(MODES[mode]?.seats || 2).fill(null),
       order: mode === 'party' ? null : [0, 1],
-      started: mode !== 'party', // a party waits for the host to start it
+      started: mode === 'duet', // a party waits for its host, a jam for its screen
       prompts: mode === 'party', // parties answer a shared prompt by default
       messages: [],
     };
@@ -96,10 +100,64 @@ export class Room extends DurableObject {
     this.broadcast({ type: 'round', end: room.messages.length, rounds: room.rounds, final: this.partyOver(), reason });
   }
 
-  // The 30-second safety net: a quiet person can't freeze the party.
+  // Timers: the party's 30-second safety net, or the end of a 90-second jam.
   async alarm() {
     await this.load();
     if (this.room.mode === 'party' && !this.partyOver()) await this.endRound('timeout');
+    if (this.room.mode === 'jam' && this.room.started && !this.room.ended) await this.endJam();
+  }
+
+  // ── jam ──
+  async jamMessage(ws, slot, msg) {
+    const room = this.room;
+    const isScreen = !!ws.deserializeAttachment()?.screen;
+    if (msg.type === 'glyphs' && room.players[slot]) {
+      // Your 4 buttons: one character each.
+      const glyphs = (Array.isArray(msg.glyphs) ? msg.glyphs : []).slice(0, 4).map((g) => [...String(g)].slice(0, 1).join(''));
+      if (glyphs.length === 4 && glyphs.every(Boolean)) room.players[slot].glyphs = glyphs;
+      await this.save();
+      this.broadcast({ type: 'room', room: this.publicRoom() });
+    } else if (msg.type === 'tap' && room.started && !room.ended && room.players[slot]) {
+      // Fire a glyph: relayed to the screen right away, and recorded for the song.
+      const now = Date.now();
+      this.lastTap ??= {};
+      if (now - (this.lastTap[slot] || 0) < MODES.jam.minGap) return; // no machine-gunning
+      this.lastTap[slot] = now;
+      const button = Math.max(0, Math.min(3, msg.button | 0));
+      if (room.taps.length < MODES.jam.maxTaps) room.taps.push([slot, button, now - room.jamStart]);
+      this.toScreens({ type: 'tap', player: slot, button });
+      if (room.taps.length % 50 === 0) await this.save(); // don't write storage on every tap
+    } else if (msg.type === 'start' && isScreen && !room.started) {
+      room.started = true;
+      room.ended = false;
+      room.jamStart = Date.now();
+      room.taps = [];
+      await this.ctx.storage.setAlarm(room.jamStart + MODES.jam.length);
+      await this.save();
+      this.broadcast({ type: 'room', room: this.publicRoom() });
+    } else if (msg.type === 'end' && isScreen && room.started && !room.ended) {
+      await this.endJam();
+    } else if (msg.type === 'again' && isScreen) {
+      Object.assign(room, { started: false, ended: false, taps: [], seed: Math.floor(Math.random() * 2 ** 31) });
+      await this.ctx.storage.deleteAlarm();
+      await this.save();
+      this.broadcast({ type: 'reset', room: this.publicRoom() });
+    }
+  }
+
+  async endJam() {
+    this.room.ended = true;
+    await this.ctx.storage.deleteAlarm();
+    await this.save();
+    this.broadcast({ type: 'room', room: this.publicRoom() });
+    this.toScreens({ type: 'jam-end', taps: this.room.taps });
+  }
+
+  toScreens(message) {
+    const text = JSON.stringify(message);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.deserializeAttachment()?.screen) try { ws.send(text); } catch { /* gone */ }
+    }
   }
 
   async save() {
@@ -113,6 +171,13 @@ export class Room extends DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
+
+    // A jam's shared screen isn't a player: it just watches, plays the sound, starts/ends the jam.
+    if (room.mode === 'jam' && url.searchParams.get('role') === 'screen') {
+      server.serializeAttachment({ clientId, slot: -1, screen: true });
+      server.send(JSON.stringify({ type: 'welcome', you: -1, screen: true, room: this.publicRoom() }));
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     // Same browser coming back gets its old seat; otherwise the first empty one.
     let slot = room.players.findIndex((p) => p?.id === clientId);
@@ -190,6 +255,8 @@ export class Room extends DurableObject {
       if (typeof msg.prompts === 'boolean' && slot === 0) room.prompts = msg.prompts; // shared prompts: host's call
       await this.save();
       this.broadcast({ type: 'room', room: this.publicRoom() });
+    } else if (room.mode === 'jam') {
+      await this.jamMessage(ws, slot, msg);
     } else if (msg.type === 'start') {
       // The party host starts it (needs at least 2 people here).
       if (room.mode !== 'party' || slot !== 0 || room.started) return;
@@ -231,12 +298,15 @@ export class Room extends DurableObject {
       seed: this.room.seed,
       order: this.room.order,
       started: !!this.room.started,
+      ended: !!this.room.ended,
+      jamLength: this.room.mode === 'jam' ? MODES.jam.length : null,
+      jamElapsed: this.room.mode === 'jam' && this.room.started ? Date.now() - this.room.jamStart : null,
       total: Number.isFinite(this.total()) ? this.total() : null,
       rounds: this.room.rounds || null,
       roundEnds: this.room.roundEnds || [],
       prompts: !!this.room.prompts,
       messages: this.room.messages,
-      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered } : null)),
+      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered, glyphs: p.glyphs || null } : null)),
     };
   }
 

@@ -810,3 +810,168 @@ export function playFinale(messages, voices, dna, callbacks) {
   const firstPassEnd = schedulePass(song, intro.end, 0);
   return { songStart, beat: beatLen, firstPass: firstPassEnd - Tone.now() };
 }
+
+// ── jam: 4-button kits, a backing beat, and a song made of everyone's taps ──
+// Each person (seat 0–7) gets their own kit: a drum, a bass, a chord stab and a
+// "spark" melody — the same 4 parts for everyone, but in different sounds.
+export const JAM_PARTS = ['drum', 'bass', 'chord', 'spark'];
+const JAM_DRUMS = [
+  () => [new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.01 }, volume: -4 }), 'C1'], // kick
+  () => [new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.01 }, volume: -14 }), null, 2200], // snap
+  () => [new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 2, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.01 }, volume: -8 }), 'G2'], // tom
+  () => [new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.05, release: 0.01 }, harmonicity: 3, resonance: 2000, volume: -20 }), 400], // rim
+  () => [new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.14, sustain: 0, release: 0.01 }, volume: -12 }), null, 1200], // clap
+  () => [new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }, volume: -18 }), null, 6500], // shaker
+  () => [new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.15, release: 0.01 }, harmonicity: 1.5, resonance: 1500, volume: -22 }), 560], // cowbell
+  () => [new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 3, envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.01 }, volume: -7 }), 'D2'], // low tom
+];
+const JAM_CHORDS = ['fattriangle', 'amsine', 'fatsawtooth', 'fmsine'];
+const JAM_SPARKS = ['bells', 'kalimba', 'glass', 'harp', 'chip', 'mallet', 'bells', 'kalimba'];
+const BASS_NAMES = Object.keys(BASSES);
+
+let jam = null; // { dna, start, beat, six, kits }
+
+// Build (once) a seat's kit. Each part remembers its last start time: one-note synths
+// can't be scheduled twice at the same moment.
+function jamKit(seat) {
+  jam.kits[seat] ??= (() => {
+    const out = new Tone.Gain(1).connect(fx.soloBus);
+    const [drumSynth, drumNote, drumFilter] = JAM_DRUMS[seat % JAM_DRUMS.length]();
+    if (drumFilter) drumSynth.chain(new Tone.Filter(drumFilter, drumFilter > 3000 ? 'highpass' : 'bandpass'), out);
+    else drumSynth.connect(out);
+    const bass = new Tone.MonoSynth({ ...BASSES[BASS_NAMES[seat % BASS_NAMES.length]], volume: -8 }).connect(out);
+    const chord = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: JAM_CHORDS[seat % JAM_CHORDS.length], count: 3, spread: 20 },
+      envelope: { attack: 0.005, decay: 0.25, sustain: 0.1, release: 0.3 }, volume: -16,
+    }).connect(new Tone.Filter(2500, 'lowpass').connect(out));
+    const [Spark, sparkOptions] = LEADS[JAM_SPARKS[seat % JAM_SPARKS.length]];
+    const spark = new Tone.PolySynth(Spark, { ...sparkOptions, volume: sparkOptions.volume + 8 }).connect(out);
+    return { drumSynth, drumNote, bass, chord, spark, last: [0, 0, 0, 0], step: [0, 0, 0, 0] };
+  })();
+  return jam.kits[seat];
+}
+
+// The chord playing at time t (the backing beat walks the key's progression, a bar each).
+function jamChordAt(t) {
+  const bar = Math.max(0, Math.floor((t - jam.start) / (jam.beat * 4)));
+  return chordFor(jam.dna, jam.dna.progression[bar % jam.dna.progression.length]);
+}
+
+// Play part `button` of `seat`'s kit at time t.
+function jamHit(seat, button, t, velocity = 0.9) {
+  const kit = jamKit(seat);
+  if (button !== 2 && t <= kit.last[button]) t = kit.last[button] + 0.02; // one-note synths: never the same instant
+  kit.last[button] = t;
+  const n = kit.step[button]++;
+  const chord = jamChordAt(t);
+  if (button === 0) {
+    if (kit.drumSynth instanceof Tone.NoiseSynth) kit.drumSynth.triggerAttackRelease(0.05, t, velocity);
+    else kit.drumSynth.triggerAttackRelease(kit.drumNote, 0.1, t, velocity);
+  } else if (button === 1) {
+    kit.bass.triggerAttackRelease(up(chord[[0, 2, 0, 1][n % 4]], n % 4 === 2 ? 0 : -12), jam.six * 1.8, t, velocity);
+  } else if (button === 2) {
+    kit.chord.triggerAttackRelease(chord.map((note) => up(note, 12)), jam.six * 2, t, velocity * 0.8);
+  } else {
+    // spark: a little random walk over the key's 5 "safe" high notes
+    const notes = rainNotes(jam.dna);
+    kit.sparkIndex = Math.max(0, Math.min(notes.length - 1, (kit.sparkIndex ?? 4) + [-2, -1, 1, 2, 0][(seat * 7 + n * 3) % 5]));
+    kit.spark.triggerAttackRelease(notes[kit.sparkIndex], '8n', t, velocity);
+  }
+  return t;
+}
+
+function setupJam(dna) {
+  stopAll();
+  setKey(dna);
+  setClarity(1, 0.5);
+  const beat = 60 / dna.bpm;
+  const old = jam?.kits || {};
+  jam = { dna, beat, six: beat / 4, start: Tone.now() + 0.2, kits: old };
+}
+
+// The screen's backing beat while everyone jams: pad, bass, soft kick + hats, bar after bar.
+export function startJamBacking(dna) {
+  setupJam(dna);
+  band = buildBand(dna);
+  const session = jam;
+  const bar = (i) => {
+    const start = session.start + i * session.beat * 4;
+    soon(start, () => {
+      if (jam !== session) return;
+      playSection(dna, { start, end: start + session.beat * 4, chord: jamChordAt(start + 0.01), level: 2, feature: true });
+      bar(i + 1);
+    });
+  };
+  bar(0);
+  return { songStart: session.start, beat: session.beat };
+}
+
+// A tap arriving on the screen: snapped to the next 16th of the beat, so everyone locks in.
+export function jamTap(seat, button) {
+  if (!jam) return Tone.now();
+  const now = Tone.now() + 0.03;
+  const t = jam.start + Math.ceil((now - jam.start) / jam.six) * jam.six;
+  return jamHit(seat, button, t);
+}
+
+// A tap on your own phone: plays right away (it's just for you).
+export function jamTapLocal(dna, seat, button) {
+  if (!jam || jam.dna !== dna) setupJam(dna);
+  return jamHit(seat, button, Tone.now() + 0.01, 0.7);
+}
+
+// The song: everyone's taps, folded into 2-bar loops. People come in one at a time,
+// then everyone plays together; on later loops, a drums-only breakdown first.
+// taps = [[seat, button, ms], …]; seats = who played (in order). onNote(seat, button) for visuals.
+export function playJamSong(taps, seats, dna, onNote) {
+  setupJam(dna);
+  band = buildBand(dna);
+  const { beat, six } = jam;
+  const patterns = {}; // seat → [steps for each button]
+  for (const seat of seats) {
+    patterns[seat] = [0, 1, 2, 3].map((button) => {
+      const counts = Array(32).fill(0);
+      for (const [s, b, ms] of taps) if (s === seat && b === button) counts[Math.round(ms / 1000 / six) % 32]++;
+      const most = Math.max(...counts);
+      return counts.map((c, step) => (c && c >= Math.max(1, most * 0.35) ? step : -1)).filter((step) => step >= 0);
+    });
+  }
+  const song = { dna };
+  currentSong = song;
+  const barLen = beat * 4;
+
+  const playBar = (start, barIndex, level, playing, drumsOnly) => {
+    playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true });
+    for (const seat of playing) {
+      patterns[seat].forEach((steps, button) => {
+        if (drumsOnly && button !== 0) return;
+        for (const step of steps) {
+          if ((step >> 4) !== barIndex % 2) continue; // which half of the 2-bar loop
+          const t = start + (step % 16) * six;
+          jamHit(seat, button, t, 0.85);
+          at(t, () => currentSong === song && onNote(seat, button));
+        }
+      });
+    }
+  };
+
+  const pass = (passStart, n) => {
+    const plan = [];
+    if (n === 0) {
+      plan.push([1, [], false], [1, [], false]); // intro: just the band
+      seats.forEach((_, i) => plan.push([2, seats.slice(0, i + 1), false], [2, seats.slice(0, i + 1), false])); // one by one
+    } else {
+      plan.push([1, seats, true], [1, seats, true]); // breakdown: drums only
+    }
+    for (let i = 0; i < 4; i++) plan.push([i < 2 ? 3 : 4, seats, false]); // everyone, all in
+    plan.forEach(([level, playing, drumsOnly], i) => {
+      const start = passStart + i * barLen;
+      soon(start, () => { if (currentSong === song) playBar(start, i, level, playing, drumsOnly); });
+    });
+    const end = passStart + plan.length * barLen;
+    soon(end, () => { if (currentSong === song) pass(end, n + 1); });
+    return end;
+  };
+  const firstEnd = pass(jam.start, 0);
+  return { songStart: jam.start, beat, firstPass: firstEnd - Tone.now() };
+}

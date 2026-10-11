@@ -4,13 +4,13 @@
 // the messages in order, so both see the same glyphs and hear the same song.
 
 import { translate } from './hangul.js';
-import { makeCipher, encode, randomSymbol, hash, seededRandom } from './glyphs.js';
+import { makeCipher, encode, randomSymbol, hash, seededRandom, SYMBOLS } from './glyphs.js';
 import { FORMATIONS, PATTERN_NAMES } from './formations.js';
 import { PICTURE_WORDS } from './pictures.js';
 import { PROMPTS, openMic, startRecording, processClip, finishBank, prepareSung } from './voicebank.js';
 import {
   initAudio, plink, bump, playInterlude, playFinale, previewClip, previewVoice, setClarity, setAmbient, stopAll,
-  VOICE_GROUPS, robotVoice, setKey, newChimes,
+  VOICE_GROUPS, robotVoice, setKey, newChimes, startJamBacking, jamTap, jamTapLocal, playJamSong,
 } from './audio.js';
 import { songDNA, messageMood } from './songdna.js';
 import { promptFor } from './prompts.js';
@@ -25,6 +25,7 @@ const GAME_MODES = {
   // Party: no turns, max 2 each per round. The room decides when a round ends (once
   // everyone has a line in, or after 30 s) and tells every phone; 3 rounds (2 if 5+ people).
   party: { perRound: 2, free: true },
+  jam: { free: true }, // no messages at all: phones tap glyphs onto the screen
 };
 const isParty = () => !!GAME_MODES[state.mode].free;
 const totalMessages = () => state.order.length * (GAME_MODES[state.mode].perPlayer || 0);
@@ -470,6 +471,7 @@ function decode(m, wi) {
 function showEncore() {
   state.phase = 'encore';
   show('end');
+  $('end-lyrics-box').hidden = false;
   $('replay').textContent = 'stop';
   const d = state.dna;
   const secrets = d.secrets.length;
@@ -1126,7 +1128,11 @@ $('message').addEventListener('input', () => {
     state.online.conn.send({ type: 'typing' });
   }
 });
-$('replay').addEventListener('click', () => (state.song ? stopSong() : startFinale()));
+$('replay').addEventListener('click', () => {
+  if (state.song) stopSong();
+  else if (state.mode === 'jam') finishJam(state.jamTaps);
+  else startFinale();
+});
 $('save').addEventListener('click', () => P.saveCanvas('glyph-garden', 'png'));
 $('again').addEventListener('click', () => {
   if (state.online) state.online.conn.send({ type: 'again' }); // the room resets both phones
@@ -1263,6 +1269,8 @@ function renderLobby() {
 function onRoom(msg) {
   const online = state.online;
   if (!online) return;
+  if (online.screen) return onJamScreen(msg);
+  if (msg.room?.mode === 'jam' || state.mode === 'jam') return onJamPhone(msg);
   if (msg.type === 'welcome') {
     online.me = msg.you;
     if (!state.started) {
@@ -1348,11 +1356,12 @@ const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
   party: 'Up to 8 people, no turns: throw words into the void whenever you like. Once everyone has said something, the garden dances; after a few rounds, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
+  jam: 'One big screen, everyone’s phones as instruments. Pick 4 glyphs, then tap them — each is a drum, a bass, a chord or a spark — and fire them onto the screen. After 90 seconds, your taps become a song.',
 };
 function pickMode(mode) {
   document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
   $('mode-blurb').textContent = BLURBS[mode];
-  for (const m of ['duet', 'party', 'diary']) $(`mode-${m}`).hidden = m !== mode;
+  for (const m of ['duet', 'party', 'diary', 'jam']) $(`mode-${m}`).hidden = m !== mode;
   $('join-form').hidden = mode === 'diary';
   $('local').hidden = mode !== 'duet';
 }
@@ -1409,6 +1418,214 @@ $('my-colors').innerHTML = Object.entries(PALETTE)
 $('my-colors').addEventListener('click', (e) => {
   const color = e.target.dataset?.color;
   if (color && !e.target.disabled) state.online?.conn.send({ type: 'settings', color });
+});
+
+// ───────────────────────── jam ─────────────────────────
+// The shared screen (TV/laptop) shows and plays everything; phones are 4-button instruments.
+
+// The jam's song recipe, the same on the screen and every phone: from the room's seed + everyone's glyphs.
+function jamDNA(room) {
+  const texts = [String(room.seed), ...room.players.filter(Boolean).map((p) => (p.glyphs || []).join(''))];
+  return songDNA(texts.map((text) => ({ text })));
+}
+
+function applyJamColors(room) {
+  room.players.forEach((p, i) => { if (p && PALETTE[p.color]) COLORS[i] = PALETTE[p.color]; });
+}
+
+const clock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`;
+
+// ── the screen ──
+function openJamScreen(code) {
+  state.mode = 'jam';
+  state.online = { code, me: -1, screen: true, room: null, conn: null };
+  try { history.replaceState(null, '', `?screen=${code}`); } catch { /* ignore */ }
+  show('jam-screen');
+  $('jam-code').textContent = code;
+  $('jam-url').textContent = location.host;
+  $('jam-hud-code').textContent = `join: ${location.host} · ${code}`;
+  state.online.conn = connect(code, { message: onRoom, status: onConnection }, 'jam', 'screen');
+}
+
+function renderJamScreen(room) {
+  $('jam-players').innerHTML = room.players.map((p, i) => (p && p.online
+    ? `<li style="color:${rgb(COLORS[i])}">${NAMES[i].toLowerCase()} ${p.glyphs ? `<b>${p.glyphs.map(escapeHtml).join('')}</b>` : '<span class="quiet-text">picking glyphs…</span>'}</li>`
+    : '')).join('') || '<li class="quiet-text">waiting for phones to join…</li>';
+  $('jam-start').disabled = !room.players.some((p) => p?.online && p.glyphs);
+}
+
+function onJamScreen(msg) {
+  const room = msg.room;
+  if (room) {
+    state.online.room = room;
+    applyJamColors(room);
+    if (!room.started) renderJamScreen(room);
+    else if (!room.ended && state.phase !== 'jam') beginJamScreen(room);
+  }
+  if (msg.type === 'tap' && state.phase === 'jam') {
+    const at = jamTap(msg.player, msg.button);
+    setTimeout(() => spawnJamGlyph(msg.player, msg.button), Math.max(0, (at - Tone.now()) * 1000));
+  } else if (msg.type === 'jam-end') {
+    finishJam(msg.taps);
+  } else if (msg.type === 'reset') {
+    stopAll();
+    clearInterval(state.jamDance);
+    state.song = null;
+    state.glyphs = [];
+    state.formation = null;
+    state.phase = 'jam-lobby';
+    show('jam-screen');
+  }
+}
+
+function beginJamScreen(room) {
+  state.phase = 'jam';
+  show(null);
+  setAmbient(false);
+  state.dna = jamDNA(room);
+  state.song = startJamBacking(state.dna); // the beat glyphs pulse to
+  $('jam-hud').hidden = false;
+  const endsAt = performance.now() + room.jamLength - (room.jamElapsed || 0);
+  clearInterval(state.jamClock);
+  state.jamClock = setInterval(() => { $('jam-timer').textContent = clock(Math.max(0, endsAt - performance.now())); }, 250);
+}
+
+// A tap lands: that player's glyph for that button flies up from the bottom, in their lane.
+function spawnJamGlyph(seat, button) {
+  const ch = state.online.room.players[seat]?.glyphs?.[button];
+  if (!ch) return;
+  const now = P.millis();
+  const lane = (seat + 0.5) / 8;
+  state.glyphs.push({
+    ch, sym: ch, player: seat, msg: -1, wi: 0, col: 0, len: 1,
+    x: P.width * (0.08 + lane * 0.84) + (Math.random() - 0.5) * 40, y: P.height + 20,
+    vx: (Math.random() - 0.5) * 160, vy: -(650 + Math.random() * 350),
+    mode: 'thrown', entered: false, launched: true, born: now, flash: 1, decodeAt: null,
+    quietUntil: Infinity, // no collision chimes in a jam — the taps are the music
+    seed: Math.random() * 1000, mood: ['excited', 'calm', 'happy', 'excited'][button], revealAt: null,
+  });
+  if (state.glyphs.length > 260) state.glyphs.shift(); // keep it light: the oldest drift away
+}
+
+// Time's up: the screen turns everyone's taps into a song.
+function finishJam(taps) {
+  stopAll();
+  clearInterval(state.jamClock);
+  clearInterval(state.jamDance);
+  $('jam-hud').hidden = true;
+  state.jamTaps = taps;
+  state.phase = 'finale';
+  const room = state.online.room;
+  const seats = room.players.map((p, i) => (p && taps.some(([s]) => s === i) ? i : -1)).filter((i) => i >= 0);
+  if (!seats.length) seats.push(...room.players.map((p, i) => (p ? i : -1)).filter((i) => i >= 0));
+  state.dna = jamDNA(room);
+  let dance = 0;
+  startFormation(danceFor('pattern', dance), 'jam0');
+  const song = playJamSong(taps, seats, state.dna, (seat) => {
+    const mine = state.glyphs.filter((g) => g.player === seat);
+    const g = mine[Math.floor(Math.random() * mine.length)];
+    if (g) g.flash = 1;
+  });
+  state.song = song;
+  // a new dance every 4 bars
+  state.jamDance = setInterval(() => { if (state.song) startFormation(danceFor('pattern', ++dance), `jam${dance}`); }, song.beat * 16 * 1000);
+  setTimeout(() => { if (state.song === song) showJamEnd(); }, song.firstPass * 1000);
+}
+
+function showJamEnd() {
+  state.phase = 'encore';
+  show('end');
+  $('replay').textContent = 'stop';
+  const d = state.dna;
+  $('end-recipe').textContent = `${d.keyName} · ${d.feel}  ·  ${d.bpm} bpm  ·  ${state.jamTaps.length} taps`;
+  $('end-secrets').textContent = '';
+  $('end-lyrics-box').hidden = true; // a jam has no words (yet)
+}
+
+// ── a phone ──
+function onJamPhone(msg) {
+  const online = state.online;
+  const room = msg.room;
+  if (msg.type === 'welcome') {
+    online.me = msg.you;
+    state.mode = 'jam';
+  }
+  if (!room) return;
+  online.room = room;
+  applyJamColors(room);
+  state.dna = jamDNA(room);
+  const me = room.players[online.me];
+  if (!me) return;
+  if (msg.type === 'welcome' && !me.glyphs) showJamSetup();
+  else if (me.glyphs) renderJamPad(room);
+}
+
+function randomGlyphs() {
+  const picks = new Set();
+  while (picks.size < 4) picks.add(SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]);
+  return [...picks];
+}
+
+function showJamSetup() {
+  show('jam-setup');
+  $('jam-pad').hidden = true;
+  const color = rgb(COLORS[state.online.me]);
+  $('jam-you').style.color = color;
+  const mine = state.online.room.players[state.online.me]?.glyphs || randomGlyphs();
+  document.querySelectorAll('.glyph-input').forEach((input, i) => { input.value = mine[i]; input.style.color = color; });
+}
+
+function renderJamPad(room) {
+  show(null);
+  $('jam-pad').hidden = false;
+  const me = state.online.me;
+  const glyphs = room.players[me].glyphs;
+  document.querySelectorAll('.pad').forEach((pad, i) => {
+    pad.querySelector('b').textContent = glyphs[i] + TEXT_STYLE;
+    pad.style.color = rgb(COLORS[me]);
+    pad.style.borderColor = rgb(COLORS[me]);
+  });
+  const live = room.started && !room.ended;
+  $('jam-pad-note').textContent = room.ended ? 'look at the screen ✶'
+    : live ? 'tap away — fire your glyphs at the screen' : 'waiting for the screen to start… (try your sounds)';
+  document.querySelector('.pads').style.opacity = room.ended ? 0.35 : 1;
+}
+
+$('host-jam').addEventListener('click', () => openJamScreen(newCode()));
+$('jam-back').addEventListener('click', () => {
+  state.online?.conn.close();
+  state.online = null;
+  state.mode = 'duet';
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  show('title');
+});
+$('jam-start').addEventListener('click', async () => {
+  await startAudio(); // the screen plays all the sound: start it on this click
+  state.online.conn.send({ type: 'start' });
+});
+$('jam-end').addEventListener('click', () => state.online?.conn.send({ type: 'end' }));
+$('jam-shuffle').addEventListener('click', () => {
+  const picks = randomGlyphs();
+  document.querySelectorAll('.glyph-input').forEach((input, i) => { input.value = picks[i]; });
+});
+$('jam-ready').addEventListener('click', async () => {
+  await startAudio(); // your phone plays your taps
+  const fallback = randomGlyphs();
+  const glyphs = [...document.querySelectorAll('.glyph-input')].map((input, i) => [...input.value.trim()][0] || fallback[i]);
+  state.online.conn.send({ type: 'glyphs', glyphs });
+});
+document.querySelectorAll('.pad').forEach((pad) => {
+  pad.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const room = state.online?.room;
+    if (!room || room.ended) return;
+    const button = Number(pad.dataset.b);
+    jamTapLocal(state.dna, state.online.me, button);
+    if (room.started) state.online.conn.send({ type: 'tap', button });
+    pad.classList.add('hit');
+    setTimeout(() => pad.classList.remove('hit'), 90);
+  });
+  pad.addEventListener('contextmenu', (e) => e.preventDefault());
 });
 
 // ───────────────────────── speak (and sing) your message ─────────────────────────
@@ -1488,9 +1705,12 @@ function fitKeyboard() {
 window.visualViewport?.addEventListener('resize', fitKeyboard);
 window.visualViewport?.addEventListener('scroll', fitKeyboard);
 
-// Opened from a shared link? Go straight to that duet's lobby.
-const roomFromLink = new URLSearchParams(location.search).get('room');
-if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
+// Opened from a shared link? Go straight to that room (or, for a jam screen, back to being the screen).
+const linkParams = new URLSearchParams(location.search);
+const roomFromLink = linkParams.get('room');
+const screenFromLink = linkParams.get('screen');
+if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
+else if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
 
 state.cipher = makeCipher(state.seed);
 window.garden = state; // handy for poking around in the browser console

@@ -25,6 +25,7 @@
       <button data-mode="duet" class="on">duet</button>
       <button data-mode="party">party</button>
       <button data-mode="diary">diary</button>
+      <button data-mode="jam">jam</button>
     </div>
     <p id="mode-blurb"></p>
     <div id="mode-duet">
@@ -35,6 +36,10 @@
     </div>
     <div id="mode-diary" hidden>
       <button id="diary">open your diary</button>
+    </div>
+    <div id="mode-jam" hidden>
+      <button id="host-jam">be the screen</button>
+      <p class="quiet-text">open this on a TV or laptop — phones join with the code below</p>
     </div>
     <form id="join-form" class="row join">
       <input id="join-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="code" aria-label="room code">
@@ -99,6 +104,47 @@
     </div>
   </section>
 
+  <!-- jam: the shared screen -->
+  <section id="jam-screen" class="panel" hidden>
+    <button id="jam-back" class="quiet back">← back</button>
+    <p class="mode">jam</p>
+    <div id="jam-code" class="big-code"></div>
+    <p class="quiet-text">on your phones: open <b id="jam-url"></b> and enter the code</p>
+    <ul id="jam-players"></ul>
+    <button id="jam-start" disabled>start the jam · 90 seconds</button>
+  </section>
+  <div id="jam-hud" hidden>
+    <span id="jam-timer"></span>
+    <span id="jam-hud-code" class="quiet-text"></span>
+    <button id="jam-end" class="quiet">end now</button>
+  </div>
+
+  <!-- jam: your phone -->
+  <section id="jam-setup" class="panel" hidden>
+    <p class="mode">jam</p>
+    <h2 id="jam-you">pick your 4 glyphs</h2>
+    <div class="glyph-picks">
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>drum</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>bass</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>chord</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>spark</span></label>
+    </div>
+    <div class="row">
+      <button id="jam-shuffle" class="quiet">shuffle</button>
+      <button id="jam-ready">ready</button>
+    </div>
+    <p id="jam-setup-note" class="quiet-text"></p>
+  </section>
+  <section id="jam-pad" hidden>
+    <p id="jam-pad-note" class="quiet-text"></p>
+    <div class="pads">
+      <button class="pad" data-b="0"><b></b><span>drum</span></button>
+      <button class="pad" data-b="1"><b></b><span>bass</span></button>
+      <button class="pad" data-b="2"><b></b><span>chord</span></button>
+      <button class="pad" data-b="3"><b></b><span>spark</span></button>
+    </div>
+  </section>
+
   <section id="write" class="panel bottom" hidden>
     <p class="prompt" hidden></p>
     <h2 id="write-who"></h2>
@@ -119,7 +165,7 @@
   <section id="end" class="panel bottom encore" hidden>
     <p id="end-recipe" class="quiet-text"></p>
     <p id="end-secrets" class="secret"></p>
-    <details>
+    <details id="end-lyrics-box">
       <summary class="quiet-text">lyrics</summary>
       <ol id="end-lyrics"></ol>
     </details>
