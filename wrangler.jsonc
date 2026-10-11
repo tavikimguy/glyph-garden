@@ -2,6 +2,8 @@
   // Cloudflare config: one Worker serves the game files (public/) and runs the duet rooms.
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "glyph-garden",
+  // tavi's personal Cloudflare account — pinned so a deploy can never land on a work account.
+  "account_id": "2698e8e7a87e17448b93279f1f941382",
   "main": "worker/index.js",
   "compatibility_date": "2026-09-01",
   "assets": {
