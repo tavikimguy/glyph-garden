@@ -1,0 +1,101 @@
+:root {
+  --bg: #05060a;
+  --ink: #e6e9f2;
+  --dim: #7b8194;
+  --line: rgba(230, 233, 242, 0.25);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 ui-monospace, "SF Mono", Menlo, "Apple SD Gothic Neo", "Noto Sans KR", monospace;
+}
+
+#stage canvas { display: block; }
+
+.panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 32px));
+  text-align: center;
+  padding: 28px 24px;
+  background: rgba(5, 6, 10, 0.72);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.panel[hidden] { display: none; }
+
+.panel.bottom {
+  top: auto;
+  bottom: 32px;
+  transform: translateX(-50%);
+  background: none;
+  border: none;
+  backdrop-filter: none;
+}
+
+h1 { font-weight: 400; letter-spacing: 0.3em; text-transform: lowercase; margin: 0 0 12px; }
+h2 { font-weight: 400; font-size: 15px; margin: 0 0 12px; }
+p { color: var(--dim); margin: 8px 0; }
+.credit { font-size: 12px; margin-top: 20px; }
+.quiet-text { font-size: 12px; }
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 18px;
+  margin: 6px 4px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--ink); }
+button.quiet { border-color: transparent; color: var(--dim); }
+button.quiet:hover { color: var(--ink); }
+
+.row { display: flex; justify-content: center; flex-wrap: wrap; }
+
+#bank-say { font-size: 72px; line-height: 1.2; margin: 8px 0; }
+
+#record {
+  padding: 14px 28px;
+  margin: 12px 0;
+  user-select: none;
+  touch-action: none;
+}
+#record.on { background: #ff5a6e; border-color: #ff5a6e; color: #05060a; }
+
+#message {
+  width: 100%;
+  font: inherit;
+  font-size: 18px;
+  color: var(--ink);
+  background: rgba(5, 6, 10, 0.6);
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 4px;
+  outline: none;
+  text-align: center;
+}
+#message:focus { border-bottom-color: var(--ink); }
+
+#lyric-sound { font-size: 20px; letter-spacing: 0.08em; }
+#lyric-sound span { opacity: 0.25; transition: opacity 0.2s; }
+#lyric-sound span.lit { opacity: 0.9; color: var(--ink); }
+#lyric-words { font-size: 26px; min-height: 1.5em; }
+#lyric-words span { opacity: 0; transition: opacity 0.6s; }
+#lyric-words span.lit { opacity: 1; }
+
+#end-lyrics { list-style: none; padding: 0; margin: 0 0 16px; text-align: left; max-height: 50vh; overflow-y: auto; }
+#end-lyrics li { margin: 10px 0; font-size: 16px; }
+#end-lyrics .sound { display: block; font-size: 12px; color: var(--dim); }

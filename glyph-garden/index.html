@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glyph Garden</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.11.13/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <section id="title" class="panel">
+    <h1>Glyph Garden</h1>
+    <p>Two people write to each other. The words get lost in translation — into glyphs,
+      into strange half-heard sounds — until, at the end, they come back as a song in your own (not quite) voices.</p>
+    <button id="begin">begin</button>
+    <button id="robots" class="quiet">skip recording — use robot voices</button>
+    <p class="credit">after <em>“Nuance” Glyph Duet</em> by Iver Kim &amp; Eunsong Shin</p>
+  </section>
+
+  <section id="bank" class="panel" hidden>
+    <h2 id="bank-who"></h2>
+    <div id="bank-say"></div>
+    <p id="bank-hint"></p>
+    <button id="record" aria-label="hold to record">● hold to record</button>
+    <p id="bank-status"></p>
+    <p id="bank-progress" class="quiet-text"></p>
+    <div class="row">
+      <button id="redo" class="quiet">← redo last</button>
+      <button id="skip-bank" class="quiet">skip — robot voice</button>
+    </div>
+  </section>
+
+  <section id="write" class="panel bottom" hidden>
+    <h2 id="write-who"></h2>
+    <input id="message" maxlength="80" autocomplete="off" spellcheck="false" placeholder="write a message…">
+    <p class="quiet-text"><span id="write-hint">enter to send</span> · <span id="write-count"></span></p>
+  </section>
+
+  <section id="lyrics" class="panel bottom" hidden>
+    <p id="lyric-sound"></p>
+    <p id="lyric-words"></p>
+  </section>
+
+  <section id="end" class="panel" hidden>
+    <h2>your song</h2>
+    <ol id="end-lyrics"></ol>
+    <div class="row">
+      <button id="replay">play it again</button>
+      <button id="save" class="quiet">save image</button>
+      <button id="again" class="quiet">new duet</button>
+    </div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
