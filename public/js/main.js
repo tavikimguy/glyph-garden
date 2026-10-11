@@ -807,6 +807,13 @@ function updateGlyphs(dt, t, now) {
       g.vy += ((ty - g.y) * 2.5 - g.vy) * k;
       g.x += g.vx * dt;
       g.y += g.vy * dt;
+    } else if (g.mode === 'jam') {
+      // Jam: fly in, then hold your place in your player's drifting shape.
+      const k = Math.min(1, dt * 2.2);
+      g.vx += ((g.tx - g.x) * 2.5 - g.vx) * k;
+      g.vy += ((g.ty - g.y) * 2.5 - g.vy) * k;
+      g.x += g.vx * dt;
+      g.y += g.vy * dt;
     } else if (g.mode === 'stage') {
       const h = stageOf(g);
       const k = Math.min(1, dt * 6);
@@ -939,6 +946,7 @@ function sketch(p) {
       p.circle(s.x * p.width, s.y * p.height, s.r);
     }
 
+    if (state.phase === 'jam') updateJamGroups(dt, t, now);
     updateGlyphs(dt, t, now);
 
     // Faint threads between neighbouring letters of the same word, while they're close.
@@ -1356,7 +1364,7 @@ const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
   party: 'Up to 8 people, no turns: throw words into the void whenever you like. Once everyone has said something, the garden dances; after a few rounds, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
-  jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 90 seconds, your taps become a song.',
+  jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 45 seconds, your taps become a song.',
 };
 function pickMode(mode) {
   document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
@@ -1483,6 +1491,7 @@ function onJamScreen(msg) {
 
 function beginJamScreen(room) {
   state.phase = 'jam';
+  state.jamGroups = {};
   show(null);
   setAmbient(false);
   state.dna = jamDNA(room);
@@ -1493,21 +1502,155 @@ function beginJamScreen(room) {
   state.jamClock = setInterval(() => { $('jam-timer').textContent = clock(Math.max(0, endsAt - performance.now())); }, 250);
 }
 
-// A tap lands: that player's glyph for that button flies up from the bottom, in their lane.
+// ── the jam's shapes ──
+// Each player's glyphs gather into their own small shape that drifts around the screen.
+// When two shapes bump, they merge into one big pattern for a while, then split again.
+const SOLO_SHAPES = ['sunflower', 'galaxy', 'rose', 'starburst', 'bloom', 'tornado', 'lissajous', 'infinity', 'orbits'];
+const DUO_SHAPES = ['helix', 'conversation', 'orbits', 'ribbons', 'binary', 'heart', 'tornado', 'infinity'];
+const PER_PLAYER = 48; // glyphs each shape holds; older ones drift off as new ones fly in
+const MERGE_TIME = 9000;
+const pickFrom = (list) => list[Math.floor(Math.random() * list.length)];
+const shapeOf = (name) => ({ name, pattern: FORMATIONS[name], params: FORMATIONS[name].setup(Math.random) });
+
+function jamGroup(seat) {
+  state.jamGroups ??= {};
+  return (state.jamGroups[seat] ??= (() => {
+    const W = P.width;
+    const H = P.height;
+    const a = Math.random() * Math.PI * 2;
+    const home = (seat / 8) * Math.PI * 2 + Math.random() * 0.5; // spread around the screen, so meetings take a while
+    return {
+      seat, x: W / 2 + Math.cos(home) * W * 0.32, y: H / 2 + Math.sin(home) * H * 0.3,
+      vx: Math.cos(a) * 30, vy: Math.sin(a) * 30, shape: shapeOf(pickFrom(SOLO_SHAPES)),
+      merged: null, calmUntil: 0,
+    };
+  })());
+}
+
+// Where a glyph goes in a shape centred on (x, y) with radius R.
+function shapeTarget(shape, g, t, x, y, R, ctx) {
+  const box = R * 2.4;
+  const [tx, ty] = shape.pattern.at(g, t, { ...ctx, W: box, H: box, cx: box / 2, cy: box / 2, R }, shape.params);
+  return [tx - box / 2 + x, ty - box / 2 + y];
+}
+
+function updateJamGroups(dt, t, now) {
+  const W = P.width;
+  const H = P.height;
+  const groups = Object.values(state.jamGroups || {});
+  const members = {};
+  for (const g of state.glyphs) if (g.mode === 'jam') (members[g.player] ??= []).push(g);
+  const radius = (n) => Math.min(H * 0.16, 34 + Math.sqrt(n) * 11);
+
+  // drift, bounce off the edges
+  for (const grp of groups) {
+    if (grp.merged && grp.merged.lead !== grp) continue; // the pair moves together
+    const R = grp.merged ? grp.merged.R : radius(members[grp.seat]?.length || 1);
+    const wobble = P.noise(grp.seat * 9.1, t * 0.15) * Math.PI * 4;
+    grp.vx += Math.cos(wobble) * 6 * dt;
+    grp.vy += Math.sin(wobble) * 6 * dt;
+    const speed = Math.hypot(grp.vx, grp.vy) || 1;
+    const want = grp.merged ? 14 : 34;
+    grp.vx *= want / speed;
+    grp.vy *= want / speed;
+    grp.x += grp.vx * dt;
+    grp.y += grp.vy * dt;
+    if (grp.x < R || grp.x > W - R) { grp.vx = Math.abs(grp.vx) * (grp.x < R ? 1 : -1); grp.x = Math.min(W - R, Math.max(R, grp.x)); }
+    if (grp.y < R + 40 || grp.y > H - R) { grp.vy = Math.abs(grp.vy) * (grp.y < R + 40 ? 1 : -1); grp.y = Math.min(H - R, Math.max(R + 40, grp.y)); }
+    if (grp.merged) { const other = grp.merged.other; other.x = grp.x; other.y = grp.y; }
+  }
+
+  // split pairs whose time is up: they push apart, and won't re-merge for a bit
+  for (const grp of groups) {
+    const m = grp.merged;
+    if (!m || m.lead !== grp || now < m.until) continue;
+    const a = Math.random() * Math.PI * 2;
+    for (const [g, sign] of [[m.lead, 1], [m.other, -1]]) {
+      g.merged = null;
+      g.calmUntil = now + 6000;
+      g.vx = Math.cos(a) * 60 * sign;
+      g.vy = Math.sin(a) * 60 * sign;
+      g.shape = shapeOf(pickFrom(SOLO_SHAPES)); // each leaves as something new
+    }
+  }
+
+  // two shapes touching: they merge into one big pattern
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const a = groups[i];
+      const b = groups[j];
+      if (a.merged || b.merged || now < a.calmUntil || now < b.calmUntil) continue;
+      const na = members[a.seat]?.length || 0;
+      const nb = members[b.seat]?.length || 0;
+      if (na < 4 || nb < 4) continue; // a shape needs a few glyphs before it can hug
+      if (Math.hypot(a.x - b.x, a.y - b.y) > radius(na) + radius(nb)) continue;
+      const pair = { lead: a, other: b, until: now + MERGE_TIME, shape: shapeOf(pickFrom(DUO_SHAPES)), R: Math.min(W, H) * 0.3 };
+      a.merged = b.merged = pair;
+      a.x = (a.x + b.x) / 2;
+      a.y = (a.y + b.y) / 2;
+      state.ripples.push({ x: a.x, y: a.y, born: now, color: COLORS[a.seat], strength: 1, rings: 3 });
+      state.ripples.push({ x: a.x, y: a.y, born: now + 120, color: COLORS[b.seat], strength: 1, rings: 3 });
+    }
+  }
+
+  // every glyph's target
+  const done = new Set();
+  for (const grp of groups) {
+    if (done.has(grp)) continue;
+    const m = grp.merged;
+    if (m) {
+      done.add(m.lead).add(m.other);
+      const A = members[m.lead.seat] || [];
+      const B = members[m.other.seat] || [];
+      const all = [...A, ...B];
+      const ctx = { n: all.length, counts: [A.length, B.length], msgs: 2, msgSize: [A.length, B.length] };
+      all.forEach((g, fi) => {
+        const side = fi < A.length ? 0 : 1;
+        Object.assign(g, { fi, side, fj: side ? fi - A.length : fi, msg: side, fm: side ? fi - A.length : fi });
+        [g.tx, g.ty] = shapeTarget(m.shape, g, t, m.lead.x, m.lead.y, m.R, ctx);
+      });
+    } else {
+      done.add(grp);
+      const mine = members[grp.seat] || [];
+      const ctx = { n: mine.length, counts: [mine.length, 0], msgs: 1, msgSize: [mine.length] };
+      const R = radius(mine.length);
+      mine.forEach((g, fi) => {
+        Object.assign(g, { fi, side: 0, fj: fi, msg: 0, fm: fi });
+        [g.tx, g.ty] = shapeTarget(grp.shape, g, t, grp.x, grp.y, R, ctx);
+      });
+    }
+  }
+}
+
+// A tap lands: the glyph flies in from a random edge and joins its player's shape.
 function spawnJamGlyph(seat, button) {
   const ch = state.online.room.players[seat]?.glyphs?.[button];
   if (!ch) return;
   const now = P.millis();
-  const lane = (seat + 0.5) / 8;
+  const W = P.width;
+  const H = P.height;
+  const grp = jamGroup(seat);
+  const edge = Math.floor(Math.random() * 4);
+  const along = Math.random();
+  const [x, y] = [[along * W, -20], [W + 20, along * H], [along * W, H + 20], [-20, along * H]][edge];
+  // thrown roughly at the shape, a bit off-line so it swoops in on a curve
+  const dx = grp.x - x;
+  const dy = grp.y - y;
+  const d = Math.hypot(dx, dy) || 1;
+  const speed = 500 + Math.random() * 300;
+  const swerve = (Math.random() - 0.5) * 0.9;
+  const vx = (dx / d) * Math.cos(swerve) * speed - (dy / d) * Math.sin(swerve) * speed;
+  const vy = (dy / d) * Math.cos(swerve) * speed + (dx / d) * Math.sin(swerve) * speed;
   state.glyphs.push({
-    ch, sym: ch, player: seat, msg: -1, wi: 0, col: 0, len: 1,
-    x: P.width * (0.08 + lane * 0.84) + (Math.random() - 0.5) * 40, y: P.height + 20,
-    vx: (Math.random() - 0.5) * 160, vy: -(650 + Math.random() * 350),
-    mode: 'thrown', entered: false, launched: true, born: now, flash: 1, decodeAt: null,
+    ch, sym: ch, player: seat, msg: 0, wi: 0, col: 0, len: 1, x, y, vx, vy, tx: grp.x, ty: grp.y,
+    mode: 'jam', entered: true, launched: true, born: now, flash: 1, decodeAt: null,
     quietUntil: Infinity, // no collision chimes in a jam — the taps are the music
     seed: Math.random() * 1000, mood: ['excited', 'calm', 'happy', 'excited'][button], revealAt: null,
   });
-  if (state.glyphs.length > 260) state.glyphs.shift(); // keep it light: the oldest drift away
+  // each shape holds its newest glyphs; the oldest let go and drift off on their own
+  const mine = state.glyphs.filter((g) => g.player === seat && g.mode === 'jam');
+  if (mine.length > PER_PLAYER) mine[0].mode = 'free';
+  if (state.glyphs.length > 300) state.glyphs.shift(); // keep it light
 }
 
 // Time's up: the screen turns everyone's taps into a song.

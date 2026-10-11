@@ -18,7 +18,7 @@ export { WordLog };
 const MODES = {
   duet: { seats: 2, perPlayer: 4 },
   party: { seats: 8, perRound: 2, roundTimeout: 30_000 },
-  jam: { seats: 8, length: 90_000, maxTaps: 4000, minGap: 70 },
+  jam: { seats: 8, length: 45_000, maxTaps: 4000, minGap: 70 },
 };
 const partyRounds = (people) => (people <= 4 ? 3 : 2);
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
