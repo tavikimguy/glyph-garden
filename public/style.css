@@ -127,7 +127,8 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
 #status {
   position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
   margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 12px; color: var(--ink);
-  background: rgba(5, 6, 10, 0.75); border: 1px solid var(--line); z-index: 10; white-space: nowrap;
+  background: rgba(5, 6, 10, 0.75); border: 1px solid var(--line); z-index: 10;
+  width: max-content; max-width: calc(100vw - 32px); text-align: center; line-height: 1.4;
 }
 
 /* ── phones ── */
@@ -156,8 +157,18 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
 
 /* ── phones: the page never scrolls; the typing box rides just above the keyboard ── */
 html, body { position: fixed; inset: 0; overscroll-behavior: none; }
-.panel.bottom { bottom: calc(16px + env(safe-area-inset-bottom) + var(--keyboard, 0px)); transition: bottom 0.15s ease-out; }
+.panel.bottom { bottom: calc(16px + env(safe-area-inset-bottom) + var(--keyboard, 0px)); }
 @media (max-width: 600px) {
   #key { max-width: calc(100vw - 24px); justify-content: center; left: 12px; right: 12px; }
   #status { top: auto; bottom: calc(110px + env(safe-area-inset-bottom) + var(--keyboard, 0px)); }
+}
+
+/* Phones: a compact typing bar. While the keyboard is open it hugs the keyboard's top edge. */
+@media (max-width: 600px) {
+  #write.panel.bottom, #waiting.panel.bottom { width: calc(100% - 16px); padding: 8px 0 0; }
+  #write h2, #waiting h2 { font-size: 13px; margin: 0 0 6px; }
+  #write .quiet-text { margin: 4px 0 0; }
+  #write-hint { display: none; }
+  body.typing #write.panel.bottom { bottom: calc(6px + var(--keyboard, 0px)); }
+  body.typing #write .quiet-text { display: none; }
 }

@@ -10,6 +10,9 @@ export { WordLog };
 const TOTAL = 8; // messages per duet (4 each)
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
 const CODE = /^[A-Z0-9]{4,8}$/;
+// Starting picks for a new player: the first ones the other player isn't using.
+const DEFAULT_VOICES = ['guitar', 'keys', 'flute', 'violin'];
+const DEFAULT_COLORS = ['sky', 'peach', 'mint', 'lilac'];
 
 export default {
   async fetch(request, env) {
@@ -72,7 +75,15 @@ export class Room extends DurableObject {
       server.close(4000, 'room full');
       return new Response(null, { status: 101, webSocket: client });
     }
-    room.players[slot] ??= { id: clientId, voice: slot ? 'keys' : 'guitar', color: slot ? 'peach' : 'sky' };
+    if (!room.players[slot]) {
+      const other = room.players[1 - slot];
+      room.players[slot] = {
+        id: clientId,
+        voice: DEFAULT_VOICES.find((v) => v !== other?.voice),
+        color: DEFAULT_COLORS.find((c) => c !== other?.color),
+        entered: false,
+      };
+    }
     server.serializeAttachment({ clientId, slot });
     await this.save();
 
@@ -98,9 +109,16 @@ export class Room extends DurableObject {
     } else if (msg.type === 'settings') {
       const me = room.players[slot];
       if (!me) return;
-      if (typeof msg.voice === 'string') me.voice = msg.voice.slice(0, 20);
-      if (typeof msg.color === 'string' && room.players[1 - slot]?.color !== msg.color) me.color = msg.color.slice(0, 20);
+      const other = room.players[1 - slot];
+      // Instruments and colours are one-per-person: you can't take your partner's.
+      if (typeof msg.voice === 'string' && other?.voice !== msg.voice) me.voice = msg.voice.slice(0, 20);
+      if (typeof msg.color === 'string' && other?.color !== msg.color) me.color = msg.color.slice(0, 20);
       if (typeof msg.prompts === 'boolean' && slot === 0) room.prompts = msg.prompts; // shared prompts: host's call
+      await this.save();
+      this.broadcast({ type: 'room', room: this.publicRoom() });
+    } else if (msg.type === 'entered') {
+      // This player has left the lobby and is in the garden.
+      if (room.players[slot]) room.players[slot].entered = true;
       await this.save();
       this.broadcast({ type: 'room', room: this.publicRoom() });
     } else if (msg.type === 'typing') {
@@ -126,7 +144,7 @@ export class Room extends DurableObject {
       total: TOTAL,
       prompts: !!this.room.prompts,
       messages: this.room.messages,
-      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i) } : null)),
+      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered } : null)),
     };
   }
 

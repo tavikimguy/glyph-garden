@@ -1,6 +1,7 @@
 // Interlude dances. Each pattern says where glyph g wants to be at time t;
 // glyphs steer toward that point, so every pattern flows instead of snapping.
-// `setup` rolls random settings so the same pattern looks different each time.
+// `setup(rand)` rolls the settings so the same pattern looks different each time;
+// rand is seeded, so both players' screens roll the very same settings.
 //
 // Glyph fields used: fi (index among all), fj (index within its player),
 // fm (index within its message), player, msg.
@@ -8,15 +9,15 @@
 
 import { PICTURES } from './pictures.js';
 
-const pick = (list) => list[Math.floor(Math.random() * list.length)];
-const between = (a, b) => a + Math.random() * (b - a);
-const dir = () => (Math.random() < 0.5 ? -1 : 1);
+const pick = (rand, list) => list[Math.floor(rand() * list.length)];
+const between = (rand, a, b) => a + rand() * (b - a);
+const dir = (rand) => (rand() < 0.5 ? -1 : 1);
 const TAU = Math.PI * 2;
 
 export const FORMATIONS = {
   // Sunflower: the golden-angle spiral seeds grow in, slowly turning.
   sunflower: {
-    setup: () => ({ spin: dir() * between(0.3, 0.7) }),
+    setup: (rand) => ({ spin: dir(rand) * between(rand, 0.3, 0.7) }),
     at: (g, t, c, v) => {
       const r = Math.sqrt((g.fi + 0.5) / c.n) * c.R;
       const a = g.fi * 2.39996 + t * v.spin;
@@ -26,7 +27,7 @@ export const FORMATIONS = {
 
   // Galaxy: a few curved arms sweeping around the centre.
   galaxy: {
-    setup: () => ({ arms: pick([2, 3, 4, 5]), twist: between(2, 4) * dir(), spin: dir() * between(0.2, 0.5) }),
+    setup: (rand) => ({ arms: pick(rand, [2, 3, 4, 5]), twist: between(rand, 2, 4) * dir(rand), spin: dir(rand) * between(rand, 0.2, 0.5) }),
     at: (g, t, c, v) => {
       const arm = g.fi % v.arms;
       const k = Math.floor(g.fi / v.arms) / Math.max(1, c.n / v.arms);
@@ -39,7 +40,7 @@ export const FORMATIONS = {
 
   // Helix: one strand per player, weaving around each other — the duet.
   helix: {
-    setup: () => ({ twists: between(1.5, 3), speed: dir() * between(1.5, 2.5), tilt: between(-0.25, 0.25) }),
+    setup: (rand) => ({ twists: between(rand, 1.5, 3), speed: dir(rand) * between(rand, 1.5, 2.5), tilt: between(rand, -0.25, 0.25) }),
     at: (g, t, c, v) => {
       const k = c.counts[g.player] > 1 ? g.fj / (c.counts[g.player] - 1) : 0.5;
       const along = (k - 0.5) * c.W * 0.84;
@@ -50,7 +51,7 @@ export const FORMATIONS = {
 
   // Orbits: one ring per message, neighbouring rings turning opposite ways.
   orbits: {
-    setup: () => ({ spin: between(0.3, 0.7), squash: between(0.6, 1) }),
+    setup: (rand) => ({ spin: between(rand, 0.3, 0.7), squash: between(rand, 0.6, 1) }),
     at: (g, t, c, v) => {
       const r = c.R * (0.25 + (0.75 * g.msg) / Math.max(1, c.msgs - 1));
       const a = (g.fm / c.msgSize[g.msg]) * TAU + t * v.spin * (g.msg % 2 ? 1 : -1);
@@ -60,7 +61,7 @@ export const FORMATIONS = {
 
   // Wave: a grid rippling like a flag in wind.
   wave: {
-    setup: () => ({ freq: between(0.3, 0.7), speed: between(2, 4), height: between(0.02, 0.05) }),
+    setup: (rand) => ({ freq: between(rand, 0.3, 0.7), speed: between(rand, 2, 4), height: between(rand, 0.02, 0.05) }),
     at: (g, t, c, v) => {
       const cols = Math.ceil(Math.sqrt((c.n * c.W) / c.H));
       const rows = Math.ceil(c.n / cols);
@@ -74,7 +75,7 @@ export const FORMATIONS = {
 
   // Heart: the two players trace one heart from opposite sides.
   heart: {
-    setup: () => ({ speed: dir() * between(0.15, 0.3), beat: between(1.5, 2.5) }),
+    setup: (rand) => ({ speed: dir(rand) * between(rand, 0.15, 0.3), beat: between(rand, 1.5, 2.5) }),
     at: (g, t, c, v) => {
       const k = g.fj / Math.max(1, c.counts[g.player]);
       const th = (g.player === 0 ? k * Math.PI : Math.PI + k * Math.PI) + t * v.speed;
@@ -88,7 +89,7 @@ export const FORMATIONS = {
 
   // Lissajous: one looping curve, with a different knot every time.
   lissajous: {
-    setup: () => ({ ratio: pick([[1, 2], [3, 2], [2, 3]]), speed: dir() * between(0.2, 0.4) }),
+    setup: (rand) => ({ ratio: pick(rand, [[1, 2], [3, 2], [2, 3]]), speed: dir(rand) * between(rand, 0.2, 0.4) }),
     at: (g, t, c, v) => {
       const th = (g.fi / c.n) * TAU + t * v.speed;
       const [a, b] = v.ratio;
@@ -98,7 +99,7 @@ export const FORMATIONS = {
 
   // Rose: petals drawn by r = cos(kθ), slowly turning.
   rose: {
-    setup: () => ({ k: pick([2, 3, 4, 5, 6, 7]), spin: dir() * between(0.15, 0.35) }),
+    setup: (rand) => ({ k: pick(rand, [2, 3, 4, 5, 6, 7]), spin: dir(rand) * between(rand, 0.15, 0.35) }),
     at: (g, t, c, v) => {
       const th = (g.fi / c.n) * Math.PI * (v.k % 2 ? 1 : 2) + t * 0.15;
       const r = Math.cos(v.k * th) * c.R * 1.05;
@@ -109,7 +110,7 @@ export const FORMATIONS = {
 
   // Binary stars: each player circles their own point; the two points circle each other.
   binary: {
-    setup: () => ({ spin: dir() * between(0.3, 0.6), inner: dir() * between(0.8, 1.4) }),
+    setup: (rand) => ({ spin: dir(rand) * between(rand, 0.3, 0.6), inner: dir(rand) * between(rand, 0.8, 1.4) }),
     at: (g, t, c, v) => {
       const centre = t * v.spin + g.player * Math.PI;
       const ox = c.cx + Math.cos(centre) * c.R * 0.5;
@@ -122,7 +123,7 @@ export const FORMATIONS = {
 
   // Conversation: two clusters leaning toward each other in turn, like talking.
   conversation: {
-    setup: () => ({ speed: between(1.5, 2.5), lean: between(0.06, 0.12) }),
+    setup: (rand) => ({ speed: between(rand, 1.5, 2.5), lean: between(rand, 0.06, 0.12) }),
     at: (g, t, c, v) => {
       const side = g.player === 0 ? -1 : 1;
       const lean = (Math.sin(t * v.speed + g.player * Math.PI) + 1) / 2;
@@ -135,7 +136,7 @@ export const FORMATIONS = {
 
   // Starburst: rays from the centre, turning and stretching.
   starburst: {
-    setup: () => ({ rays: pick([6, 8, 10, 12]), spin: dir() * between(0.1, 0.3), breathe: between(1, 2) }),
+    setup: (rand) => ({ rays: pick(rand, [6, 8, 10, 12]), spin: dir(rand) * between(rand, 0.1, 0.3), breathe: between(rand, 1, 2) }),
     at: (g, t, c, v) => {
       const ray = g.fi % v.rays;
       const k = (Math.floor(g.fi / v.rays) + 1) / Math.ceil(c.n / v.rays);
@@ -147,7 +148,7 @@ export const FORMATIONS = {
 
   // Bloom: concentric rings that breathe in and out one after another.
   bloom: {
-    setup: () => ({ rings: pick([4, 5, 6]), speed: between(1.5, 3), spin: dir() * between(0.1, 0.3) }),
+    setup: (rand) => ({ rings: pick(rand, [4, 5, 6]), speed: between(rand, 1.5, 3), spin: dir(rand) * between(rand, 0.1, 0.3) }),
     at: (g, t, c, v) => {
       const ring = g.fi % v.rings;
       const inRing = Math.floor(g.fi / v.rings);
@@ -160,7 +161,7 @@ export const FORMATIONS = {
 
   // Tornado: a funnel spinning around a vertical axis, wide at the top.
   tornado: {
-    setup: () => ({ spin: dir() * between(1.5, 2.5), sway: between(20, 60) }),
+    setup: (rand) => ({ spin: dir(rand) * between(rand, 1.5, 2.5), sway: between(rand, 20, 60) }),
     at: (g, t, c, v) => {
       const k = g.fi / Math.max(1, c.n - 1);
       const y = c.H * 0.12 + k * c.H * 0.76;
@@ -172,7 +173,7 @@ export const FORMATIONS = {
 
   // Ribbons: one sine ribbon per message, stacked, each with its own phase.
   ribbons: {
-    setup: () => ({ speed: dir() * between(1.5, 3), waves: between(1, 2.5) }),
+    setup: (rand) => ({ speed: dir(rand) * between(rand, 1.5, 3), waves: between(rand, 1, 2.5) }),
     at: (g, t, c, v) => {
       const k = g.fm / Math.max(1, c.msgSize[g.msg] - 1);
       const y0 = c.H * (0.15 + (0.7 * g.msg) / Math.max(1, c.msgs - 1));
@@ -182,7 +183,7 @@ export const FORMATIONS = {
 
   // Infinity: a figure-eight, the two players chasing each other around it.
   infinity: {
-    setup: () => ({ speed: dir() * between(0.25, 0.5) }),
+    setup: (rand) => ({ speed: dir(rand) * between(rand, 0.25, 0.5) }),
     at: (g, t, c, v) => {
       const k = g.fj / Math.max(1, c.counts[g.player]);
       const th = k * Math.PI + g.player * Math.PI + t * v.speed;
@@ -193,7 +194,7 @@ export const FORMATIONS = {
 
   // Pulse grid: a square lattice, turning slowly, waves of pressure through it.
   lattice: {
-    setup: () => ({ spin: dir() * between(0.1, 0.25), speed: between(2, 3) }),
+    setup: (rand) => ({ spin: dir(rand) * between(rand, 0.1, 0.25), speed: between(rand, 2, 3) }),
     at: (g, t, c, v) => {
       const side = Math.ceil(Math.sqrt(c.n));
       const gap = (c.R * 1.7) / side;

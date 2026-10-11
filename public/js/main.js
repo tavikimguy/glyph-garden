@@ -4,7 +4,7 @@
 // the messages in order, so both see the same glyphs and hear the same song.
 
 import { translate } from './hangul.js';
-import { makeCipher, encode, randomSymbol } from './glyphs.js';
+import { makeCipher, encode, randomSymbol, hash, seededRandom } from './glyphs.js';
 import { FORMATIONS, PATTERN_NAMES } from './formations.js';
 import { PICTURE_WORDS } from './pictures.js';
 import { PROMPTS, openMic, startRecording, processClip, finishBank } from './voicebank.js';
@@ -54,7 +54,6 @@ const state = {
   revealed: new Set(), // letters whose real identity has been revealed (one per message)
   prompts: false, // shared-prompt mode (the host's choice online)
   seed: Math.floor(Math.random() * 2 ** 31), // this duet's seed: glyphs + prompts
-  decks: { pattern: [], picture: [] }, // shuffled dances still to come, so none repeats until all have played
 };
 
 // ───────────────────────── voice bank ─────────────────────────
@@ -267,8 +266,10 @@ function afterSend() {
     item.glyphs.forEach((g) => { g.flash = 1; });
   });
   // A pattern first, then (if someone said cat, moon, love…) it turns into that picture halfway.
-  startFormation(nextDance('pattern'));
-  setTimeout(() => { if (state.phase === 'interlude') startFormation(nextDance('picture')); }, (seconds * 1000) * 0.45);
+  const pattern = danceFor('pattern', round - 1);
+  const picture = danceFor('picture', round - 1);
+  startFormation(pattern, `interlude${round}a`);
+  setTimeout(() => { if (state.phase === 'interlude') startFormation(picture, `interlude${round}b`); }, (seconds * 1000) * 0.45);
   setTimeout(() => {
     endFormation();
     startWriting();
@@ -294,14 +295,17 @@ function startFinale() {
     g.mode = 'free';
     g.decodeAt = null;
   }
-  startFormation(nextDance('pattern'));
+  startFormation(danceFor('pattern', 3), 'finale');
   state.dna = songDNA(state.messages);
   const song = playFinale(state.messages, state.banks, state.dna, {
-    onMessage(m) {
+    onMessage(m, pass) {
       if (state.focus >= 0) decode(state.focus, Infinity);
       state.focus = m; // its glyphs light up where they are; the lyric shows centre stage
       // A new move every two messages, alternating patterns and pictures.
-      if (m % 2 === 0) startFormation(nextDance(m % 4 === 0 ? 'pattern' : 'picture'));
+      if (m % 2 === 0) {
+        const slot = 4 + pass * 4 + m / 2;
+        startFormation(danceFor(m % 4 === 0 ? 'pattern' : 'picture', slot), `song${pass}-${m}`);
+      }
     },
     onSyllable(m, wi, si) {
       if (si === 0) decode(m, wi); // the word appears the moment it starts being sung
@@ -370,7 +374,6 @@ function newDuet(seed = Math.floor(Math.random() * 2 ** 31)) {
   state.glyphs = [];
   state.ripples = [];
   state.formation = null;
-  state.decks = { pattern: [], picture: [] };
   setKey(songDNA([]));
   startWriting();
 }
@@ -430,14 +433,6 @@ function spawnMessage(msg, m) {
     });
   });
   return order * 45 + 1400;
-}
-
-function shuffle(list) {
-  for (let i = list.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [list[i], list[j]] = [list[j], list[i]];
-  }
-  return list;
 }
 
 function glyphSize() {
@@ -503,23 +498,32 @@ function stageOf(g) {
 }
 
 // Between rounds the glyphs band together into a moving pattern or a picture
-// (see formations.js and pictures.js). kind = 'pattern' or 'picture'.
-function nextDance(kind) {
+// (see formations.js and pictures.js). Which one plays in each slot comes from
+// the duet's seed and the words said — never from this phone's own randomness —
+// so both screens (even one that joined late) dance the same dance.
+function danceFor(kind, slot) {
   if (kind === 'picture') {
-    // Only pictures of things someone has actually said (cat, moon, love…).
-    const said = new Set(state.messages.flatMap((m) => m.text.toLowerCase().match(/[a-z']+/g) || []));
-    const earned = Object.keys(PICTURE_WORDS).filter((name) => PICTURE_WORDS[name].some((w) => said.has(w)));
-    if (!earned.length) return nextDance('pattern');
-    const deck = state.decks.picture.filter((name) => earned.includes(name));
-    state.decks.picture = deck.length ? deck : shuffle(earned);
-    return state.decks.picture.pop();
+    const earned = earnedPictures();
+    if (earned.length) return earned[earned.length - 1 - (slot % earned.length)]; // newest first
   }
-  const deck = state.decks.pattern;
-  if (!deck.length) deck.push(...shuffle([...PATTERN_NAMES]));
-  return deck.pop();
+  const rand = seededRandom(state.seed ^ 0xda);
+  const order = PATTERN_NAMES.map((name) => [rand(), name]).sort((a, b) => a[0] - b[0]).map(([, name]) => name);
+  return order[slot % order.length];
 }
 
-// Colour words: say "blue" and the next picture is dyed blue — and stays blue.
+// Pictures someone has "earned" by saying their word (cat, moon, love…), in the order first said.
+function earnedPictures() {
+  const earned = [];
+  for (const m of state.messages) {
+    for (const word of m.text.toLowerCase().match(/[a-z']+/g) || []) {
+      const name = Object.keys(PICTURE_WORDS).find((pic) => PICTURE_WORDS[pic].includes(word));
+      if (name && !earned.includes(name)) earned.push(name);
+    }
+  }
+  return earned;
+}
+
+// Colour words: say "blue" and the next shape is dyed blue — and stays blue.
 const COLOR_WORDS = {
   red: [255, 90, 90], crimson: [220, 40, 70], orange: [255, 160, 70], yellow: [255, 230, 90],
   gold: [255, 205, 80], green: [110, 230, 120], lime: [180, 255, 90], teal: [70, 210, 190],
@@ -553,7 +557,9 @@ function tintOf(g, now) {
   return g.tint || COLORS[g.player];
 }
 
-function startFormation(name) {
+// slot = a name for this moment ("interlude2b", "song0-4"); with the seed it
+// fixes the dance's settings so every phone rolls the same ones.
+function startFormation(name, slot) {
   const counts = [0, 0];
   const msgSize = [];
   state.glyphs.forEach((g, i) => {
@@ -563,12 +569,12 @@ function startFormation(name) {
     msgSize[g.msg] = g.fm + 1;
     if (g.mode !== 'stage') g.mode = 'form';
   });
-  const dye = PICTURE_WORDS[name] ? latestColor() : null;
-  if (dye) state.glyphs.forEach((g) => { g.tint = dye; }); // the picture takes the colour, for good
+  const dye = latestColor();
+  if (dye) state.glyphs.forEach((g) => { g.tint = dye; }); // the shape takes the colour, for good
   state.formation = {
     name,
     pattern: FORMATIONS[name],
-    params: FORMATIONS[name].setup(),
+    params: FORMATIONS[name].setup(seededRandom(hash(`${state.seed}:${slot}:${name}`))),
     ctx: { n: state.glyphs.length, counts, msgs: state.messages.length, msgSize },
   };
 }
@@ -958,7 +964,7 @@ function onConnection(status) {
   if (status === 'full') {
     show('title');
     banner.hidden = false;
-    banner.textContent = 'that duet already has two people — start a new one';
+    banner.textContent = 'that duet is full — start your own';
     state.online.conn.close();
     state.online = null;
     return;
@@ -978,21 +984,32 @@ function applyRoom(room) {
     const current = state.banks[i]?.robot || state.banks[i]?.instrument;
     if (current !== p.voice) state.banks[i] = robotVoice(p.voice);
   });
-  const them = room.players[1 - state.online.me];
-  if (state.started && them && !them.online && state.phase !== 'finale' && state.phase !== 'encore') {
-    $('status').hidden = false;
-    $('status').textContent = 'they left — they can come back with the same link';
-  } else if (state.started) {
-    $('status').hidden = true;
+  // In the garden: say what the other person is up to, if they're not here yet.
+  if (state.started && state.phase !== 'finale' && state.phase !== 'encore') {
+    const note = partnerNote(room, true);
+    $('status').hidden = !note;
+    $('status').textContent = note;
   }
+}
+
+// "player 1" / "player 2", from your point of view.
+const partnerName = () => `player ${2 - state.online.me}`;
+
+// What the other person is doing. inGarden = shown to someone already playing.
+function partnerNote(room, inGarden) {
+  const them = room.players[1 - state.online.me];
+  if (!them) return inGarden ? 'waiting for them to join — send the link' : 'send them the link or the code — waiting for them to join';
+  if (!them.online) return `${partnerName()} left — they can come back with the same link`;
+  if (them.entered) return inGarden ? '' : `${partnerName()} is in the garden — waiting for you ✶`;
+  return inGarden ? `waiting for ${partnerName()} to enter the garden` : `${partnerName()} is here — picking their sound`;
 }
 
 function renderLobby() {
   const { room, me } = state.online;
   const them = room.players[1 - me];
-  $('lobby-status').textContent = them?.online
-    ? 'they’re here ✶'
-    : `send them the link or the code — waiting for them to join`;
+  $('lobby-status').textContent = partnerNote(room, false);
+  // Your partner's instrument is theirs: grey it out in your list.
+  for (const option of $('my-voice').options) option.disabled = option.value === them?.voice;
   $('me-label').textContent = me === 0 ? 'you (first)' : 'you';
   $('prompts-online').checked = !!room.prompts;
   $('prompts-online').disabled = me !== 0; // the host decides
@@ -1054,11 +1071,15 @@ function onRoom(msg) {
 async function enterGarden() {
   await startAudio();
   state.started = true;
+  state.online.conn.send({ type: 'entered' });
   state.seed = state.online.room.seed;
   state.cipher = makeCipher(state.seed);
   for (const m of state.online.room.messages) receive(m.player, m.text, true);
   if (state.messages.length >= TOTAL) setTimeout(startFinale, 1500);
   else startWriting();
+  const note = partnerNote(state.online.room, true);
+  $('status').hidden = !note;
+  $('status').textContent = note;
 }
 
 $('host').addEventListener('click', () => openLobby(newCode()));
@@ -1132,18 +1153,18 @@ if (Recognition) {
 }
 
 // ───────────────────────── phone keyboard ─────────────────────────
-// When the keyboard opens, the visible part of the page shrinks. Measure how much
-// and lift the bottom panels by that amount, so the typing box stays in view.
+// The screen itself never moves. When the keyboard opens, the visible area shrinks:
+// measure how much of the screen the keyboard covers and sit the typing bar right
+// on top of it (no animation, no page scrolling — those made it jumpy).
 function fitKeyboard() {
   const vv = window.visualViewport;
   if (!vv) return;
-  const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
   document.documentElement.style.setProperty('--keyboard', `${covered}px`);
-  window.scrollTo(0, 0); // iPhone likes to scroll the page under the keyboard; undo it
+  document.body.classList.toggle('typing', covered > 80);
 }
 window.visualViewport?.addEventListener('resize', fitKeyboard);
 window.visualViewport?.addEventListener('scroll', fitKeyboard);
-$('message').addEventListener('focus', () => setTimeout(fitKeyboard, 300));
 
 // Opened from a shared link? Go straight to that duet's lobby.
 const roomFromLink = new URLSearchParams(location.search).get('room');

@@ -3,8 +3,8 @@
 // Drawings live in a -1…1 box (y points down); glyphs spread evenly along the lines.
 
 const TAU = Math.PI * 2;
-const between = (a, b) => a + Math.random() * (b - a);
-const dir = () => (Math.random() < 0.5 ? -1 : 1);
+const between = (rand, a, b) => a + rand() * (b - a);
+const dir = (rand) => (rand() < 0.5 ? -1 : 1);
 
 // ── tiny drawing kit ──
 function arc(cx, cy, rx, ry, from = 0, to = TAU, steps = 28) {
@@ -190,7 +190,7 @@ export const PICTURE_WORDS = {
 };
 
 export const PICTURES = Object.fromEntries(Object.keys(DRAWINGS).map((name) => [name, {
-  setup: () => ({ dir: dir(), size: between(1, 1.2), flip: Math.random() < 0.5 ? -1 : 1 }),
+  setup: (rand) => ({ dir: dir(rand), size: between(rand, 1, 1.2), flip: rand() < 0.5 ? -1 : 1 }),
   at: (g, t, c, v) => {
     const [x, y] = MOTION[name](...pointAt(DRAWINGS[name], (g.fi + 0.5) / c.n), t, v);
     const s = c.R * v.size;
