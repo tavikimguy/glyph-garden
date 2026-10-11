@@ -123,27 +123,23 @@
   <!-- jam: your phone -->
   <section id="jam-setup" class="panel" hidden>
     <p class="mode">jam</p>
-    <h2 id="jam-you">pick your 4 glyphs</h2>
+    <h2 id="jam-you">pick 4 symbols</h2>
+    <p class="quiet-text">every symbol is its own sound: tap to hear it, swipe for more</p>
+    <div id="jam-choices" class="symbol-strip"></div>
+    <div id="jam-picked" class="glyph-picks"></div>
     <p class="quiet-text">give each a word if you like: it gets sung when you play it</p>
-    <div class="glyph-picks">
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>drum</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>bass</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>chord</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>spark</span></label>
-    </div>
     <div class="row">
-      <button id="jam-shuffle" class="quiet">shuffle</button>
-      <button id="jam-ready">ready</button>
+      <button id="jam-shuffle" class="quiet">new symbols</button>
+      <button id="jam-ready" disabled>ready</button>
     </div>
-    <p id="jam-setup-note" class="quiet-text"></p>
   </section>
   <section id="jam-pad" hidden>
     <p id="jam-pad-note" class="quiet-text"></p>
     <div class="pads">
-      <button class="pad" data-b="0"><b></b><span>drum</span></button>
-      <button class="pad" data-b="1"><b></b><span>bass</span></button>
-      <button class="pad" data-b="2"><b></b><span>chord</span></button>
-      <button class="pad" data-b="3"><b></b><span>spark</span></button>
+      <button class="pad" data-b="0"><b></b><span></span></button>
+      <button class="pad" data-b="1"><b></b><span></span></button>
+      <button class="pad" data-b="2"><b></b><span></span></button>
+      <button class="pad" data-b="3"><b></b><span></span></button>
     </div>
   </section>
 

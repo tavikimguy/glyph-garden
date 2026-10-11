@@ -10,7 +10,7 @@ import { PICTURE_WORDS } from './pictures.js';
 import { PROMPTS, openMic, startRecording, processClip, finishBank, prepareSung } from './voicebank.js';
 import {
   initAudio, plink, bump, playInterlude, playFinale, previewClip, previewVoice, setClarity, setAmbient, stopAll,
-  VOICE_GROUPS, robotVoice, setKey, newChimes, startJamBacking, jamTap, jamTapLocal, playJamSong,
+  VOICE_GROUPS, robotVoice, setKey, newChimes, startJamBacking, jamTap, jamTapLocal, playJamSong, jamSoundIndex,
 } from './audio.js';
 import { songDNA, messageMood } from './songdna.js';
 import { promptFor } from './prompts.js';
@@ -1356,7 +1356,7 @@ const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
   party: 'Up to 8 people, no turns: throw words into the void whenever you like. Once everyone has said something, the garden dances; after a few rounds, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
-  jam: 'One big screen, everyone’s phones as instruments. Pick 4 glyphs, then tap them — each is a drum, a bass, a chord or a spark — and fire them onto the screen. After 90 seconds, your taps become a song.',
+  jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 90 seconds, your taps become a song.',
 };
 function pickMode(mode) {
   document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
@@ -1463,7 +1463,9 @@ function onJamScreen(msg) {
     else if (!room.ended && state.phase !== 'jam') beginJamScreen(room);
   }
   if (msg.type === 'tap' && state.phase === 'jam') {
-    const at = jamTap(msg.player, msg.button);
+    const symbol = state.online.room.players[msg.player]?.glyphs?.[msg.button];
+    if (!symbol) return;
+    const at = jamTap(symbol);
     setTimeout(() => spawnJamGlyph(msg.player, msg.button), Math.max(0, (at - Tone.now()) * 1000));
   } else if (msg.type === 'jam-end') {
     finishJam(msg.taps);
@@ -1526,7 +1528,8 @@ function finishJam(taps) {
     lyrics[seat] = (room.players[seat].words || []).map((w) => (w ? { word: w, syllables: translate(w).flatMap((x) => x.syllables) } : null))
       .map((w) => (w?.syllables.length ? w : null));
   }
-  const song = playJamSong(taps, seats, state.dna, (seat) => {
+  const glyphs = room.players.map((p) => p?.glyphs || null);
+  const song = playJamSong(taps, glyphs, seats, state.dna, (seat) => {
     const mine = state.glyphs.filter((g) => g.player === seat);
     const g = mine[Math.floor(Math.random() * mine.length)];
     if (g) g.flash = 1;
@@ -1582,21 +1585,44 @@ function onJamPhone(msg) {
   else if (me.glyphs) renderJamPad(room);
 }
 
-function randomGlyphs() {
-  const picks = new Set();
-  while (picks.size < 4) picks.add(SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]);
-  return [...picks];
+// The 40 symbols a phone can choose from: symbols and letters, each making a different
+// sound where possible. "new symbols" deals another 40 (keeping the ones you've picked).
+const JAM_POOL = [...SYMBOLS, ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+function dealSymbols() {
+  const picks = state.jamPicks;
+  const offer = [...picks];
+  const sounds = new Set(picks.map(jamSoundIndex));
+  const pool = JAM_POOL.filter((s) => !picks.includes(s)).sort(() => Math.random() - 0.5);
+  for (const s of pool) {
+    if (offer.length >= 40) break;
+    if (!sounds.has(jamSoundIndex(s))) { offer.push(s); sounds.add(jamSoundIndex(s)); }
+  }
+  for (const s of pool) if (offer.length < 40 && !offer.includes(s)) offer.push(s); // more symbols than sounds: top up
+  state.jamOffer = offer.slice(picks.length).sort(() => Math.random() - 0.5);
+  state.jamOffer.unshift(...picks);
+  renderJamChoices();
+}
+
+function renderJamChoices() {
+  const color = rgb(COLORS[state.online.me]);
+  $('jam-choices').innerHTML = state.jamOffer.map((s) => `<button data-s="${escapeHtml(s)}" class="${state.jamPicks.includes(s) ? 'chosen' : ''}" style="color:${color}">${escapeHtml(s)}${TEXT_STYLE}</button>`).join('');
+  $('jam-picked').innerHTML = [0, 1, 2, 3].map((i) => {
+    const s = state.jamPicks[i];
+    return `<label style="color:${color}"><span class="slot ${s ? 'filled' : ''}">${s ? escapeHtml(s) + TEXT_STYLE : ''}</span>`
+      + `<input class="word-input" maxlength="12" autocomplete="off" placeholder="word" data-s="${s ? escapeHtml(s) : ''}" value="${escapeHtml(state.jamWords[s] || '')}" ${s ? '' : 'disabled'}></label>`;
+  }).join('');
+  $('jam-ready').disabled = state.jamPicks.length < 4;
 }
 
 function showJamSetup() {
   show('jam-setup');
   $('jam-pad').hidden = true;
-  const color = rgb(COLORS[state.online.me]);
-  $('jam-you').style.color = color;
-  const mine = state.online.room.players[state.online.me]?.glyphs || randomGlyphs();
-  document.querySelectorAll('.glyph-input').forEach((input, i) => { input.value = mine[i]; input.style.color = color; });
-  const words = state.online.room.players[state.online.me]?.words || [];
-  document.querySelectorAll('.word-input').forEach((input, i) => { input.value = words[i] || ''; });
+  $('jam-you').style.color = rgb(COLORS[state.online.me]);
+  const me = state.online.room.players[state.online.me];
+  state.jamPicks = me?.glyphs ? [...me.glyphs] : [];
+  state.jamWords = {};
+  state.jamPicks.forEach((s, i) => { state.jamWords[s] = me.words?.[i] || ''; });
+  dealSymbols();
 }
 
 function renderJamPad(room) {
@@ -1606,7 +1632,7 @@ function renderJamPad(room) {
   const glyphs = room.players[me].glyphs;
   document.querySelectorAll('.pad').forEach((pad, i) => {
     pad.querySelector('b').textContent = glyphs[i] + TEXT_STYLE;
-    pad.querySelector('span').textContent = room.players[me].words?.[i] || ['drum', 'bass', 'chord', 'spark'][i];
+    pad.querySelector('span').textContent = room.players[me].words?.[i] || '';
     pad.style.color = rgb(COLORS[me]);
     pad.style.borderColor = rgb(COLORS[me]);
   });
@@ -1629,15 +1655,34 @@ $('jam-start').addEventListener('click', async () => {
   state.online.conn.send({ type: 'start' });
 });
 $('jam-end').addEventListener('click', () => state.online?.conn.send({ type: 'end' }));
-$('jam-shuffle').addEventListener('click', () => {
-  const picks = randomGlyphs();
-  document.querySelectorAll('.glyph-input').forEach((input, i) => { input.value = picks[i]; });
+$('jam-shuffle').addEventListener('click', dealSymbols);
+// Tap a symbol: hear it, and pick it (or un-pick it). A 5th pick replaces your first.
+$('jam-choices').addEventListener('click', async (e) => {
+  const symbol = e.target.closest('button')?.dataset.s;
+  if (!symbol) return;
+  await startAudio();
+  jamTapLocal(state.dna, symbol);
+  const picks = state.jamPicks;
+  if (picks.includes(symbol)) picks.splice(picks.indexOf(symbol), 1);
+  else {
+    if (picks.length >= 4) picks.shift();
+    picks.push(symbol);
+  }
+  renderJamChoices();
+});
+// Tap a picked slot to hear it again.
+$('jam-picked').addEventListener('click', (e) => {
+  const i = [...$('jam-picked').children].indexOf(e.target.closest('label'));
+  if (e.target.classList.contains('slot') && state.jamPicks[i]) jamTapLocal(state.dna, state.jamPicks[i]);
+});
+$('jam-picked').addEventListener('input', (e) => {
+  if (e.target.dataset.s) state.jamWords[e.target.dataset.s] = e.target.value;
 });
 $('jam-ready').addEventListener('click', async () => {
+  if (state.jamPicks.length < 4) return;
   await startAudio(); // your phone plays your taps
-  const fallback = randomGlyphs();
-  const glyphs = [...document.querySelectorAll('.glyph-input')].map((input, i) => [...input.value.trim()][0] || fallback[i]);
-  const words = [...document.querySelectorAll('.word-input')].map((input) => input.value.trim());
+  const glyphs = [...state.jamPicks];
+  const words = glyphs.map((s) => (state.jamWords[s] || '').trim());
   state.online.conn.send({ type: 'glyphs', glyphs, words });
 });
 document.querySelectorAll('.pad').forEach((pad) => {
@@ -1646,7 +1691,7 @@ document.querySelectorAll('.pad').forEach((pad) => {
     const room = state.online?.room;
     if (!room || room.ended) return;
     const button = Number(pad.dataset.b);
-    jamTapLocal(state.dna, state.online.me, button);
+    jamTapLocal(state.dna, room.players[state.online.me].glyphs[button]);
     if (room.started) state.online.conn.send({ type: 'tap', button });
     pad.classList.add('hit');
     setTimeout(() => pad.classList.remove('hit'), 90);

@@ -64,7 +64,12 @@ export class Room extends DurableObject {
   //         order: [seats, in turn order] (set when a party starts), messages: [{ player, text }] }
   // The first person to open a room decides its mode (duet or party).
   async load(mode = 'duet') {
-    this.room ??= (await this.ctx.storage.get('room')) ?? {
+    if (this.room) return this.room;
+    this.room = await this.ctx.storage.get('room');
+    if (this.room) return this.room;
+    // A new room: save it straight away. Cloudflare puts idle rooms to sleep (dropping
+    // what's in memory), and an unsaved jam would wake up as a brand-new duet.
+    this.room = {
       mode: MODES[mode] ? mode : 'duet',
       seed: Math.floor(Math.random() * 2 ** 31),
       players: Array(MODES[mode]?.seats || 2).fill(null),
@@ -73,6 +78,7 @@ export class Room extends DurableObject {
       prompts: mode === 'party', // parties answer a shared prompt by default
       messages: [],
     };
+    await this.save();
     return this.room;
   }
 
