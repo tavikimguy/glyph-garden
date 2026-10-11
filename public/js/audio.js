@@ -678,7 +678,8 @@ function makeSnareAndHat(kit, drums, keep, quieter = 0) {
 
 // The band builds: 0 pad + arpeggio · 1 + bass · 2 + kick & hats · 3 + snare & high pad · 4 everything, busier.
 // feature = someone's line is playing: the band's lead steps back to leave them room.
-function playSection(dna, { start, end, chord, level, crash, feature = false }) {
+// groove (jam): a steady full kit and a walking bassline under everything, no snare rolls.
+function playSection(dna, { start, end, chord, level, crash, feature = false, groove = false }) {
   const beatLen = 60 / dna.bpm;
   const six = beatLen / 4;
   const length = end - start;
@@ -692,11 +693,13 @@ function playSection(dna, { start, end, chord, level, crash, feature = false }) 
   const rate = level >= 4 ? 1 : dna.arpRate;
   const beat = BEATS[dna.pattern];
   const root = up(chord[0], -12);
+  // the jam's bassline: root, root, fifth, root, octave, fifth, fifth: it walks, but always lands home
+  const line = groove ? { 0: root, 3: root, 6: up(chord[2], -12), 8: root, 10: chord[0], 11: up(chord[2], -12), 14: up(chord[2], -12) } : null;
 
   for (let k = 0; k < totalSteps; k++) {
     const step = k % 16;
     const t = start + k * six + (k % 2 ? dna.swing * six : 0); // swing pushes the off-steps late
-    const fill = level >= 3 && totalSteps >= 8 && k >= totalSteps - 4; // snare roll into the next part
+    const fill = !groove && level >= 3 && totalSteps >= 8 && k >= totalSteps - 4; // snare roll into the next part
     if (feature) {
       if (step % 4 === 0) band.lead.triggerAttackRelease(tones[shape[(k >> 2) % shape.length]], '16n', t, 0.12); // just a soft pulse
     } else if (k % rate === 0) {
@@ -704,7 +707,8 @@ function playSection(dna, { start, end, chord, level, crash, feature = false }) 
     }
     // the stacked second lead answers on the in-between steps, an octave up, going the other way
     if (band.lead2 && !feature && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
-    if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
+    if (line) { if (line[step]) band.bass.triggerAttackRelease(line[step], step === 0 ? six * 2.6 : six * 1.6, t, 0.9); }
+    else if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
     if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
     if (level >= 2 && beat.hat.includes(step)) band.hat.triggerAttackRelease(0.02, t, 0.7);
     else if (level >= 4 && step % 2 === 1) band.hat.triggerAttackRelease(0.02, t, 0.3);
@@ -922,7 +926,7 @@ export function startJamBacking(dna) {
     const start = session.start + i * session.beat * 4;
     soon(start, () => {
       if (jam !== session) return;
-      playSection(dna, { start, end: start + session.beat * 4, chord: jamChordAt(start + 0.01), level: 2, feature: true });
+      playSection(dna, { start, end: start + session.beat * 4, chord: jamChordAt(start + 0.01), level: 3, feature: true, groove: true });
       bar(i + 1);
     });
   };
@@ -945,7 +949,8 @@ export function jamTapLocal(dna, symbol) {
 }
 
 // The song: everyone's taps, folded into 2-bar loops, all playing at once (no turns).
-// Later loops start with a drums-only breakdown.
+// The band's drums + bassline run the whole way through. Later loops start with a
+// breakdown where only people's drum symbols play over them.
 // taps = [[seat, button, ms], …]; glyphs[seat] = that phone's 4 symbols; seats = who played.
 // lyrics[seat][button] = a translated word ({ word, syllables }) or null: whenever a glyph
 // with a word plays, that person's voice sings it. onNote(seat, button) / onWord(seat, word) for visuals.
@@ -1007,7 +1012,7 @@ export function playJamSong(taps, glyphs, seats, dna, onNote, lyrics = {}, onWor
   };
 
   const playBar = (start, barIndex, level, drumsOnly) => {
-    playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true });
+    playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true, groove: true });
     for (const seat of seats) {
       if (!drumsOnly) singWords(seat, start, barIndex);
       patterns[seat].forEach((steps, button) => {
@@ -1024,14 +1029,14 @@ export function playJamSong(taps, glyphs, seats, dna, onNote, lyrics = {}, onWor
   };
 
   const pass = (passStart, n) => {
-    // first time: 2 bars of just the band; after that: 2 bars of drums only. Then everyone, all in.
-    const plan = n === 0 ? [[1, null], [1, null]] : [[1, true], [1, true]];
+    // first time: 2 bars of just the band; after that: 2 bars of only people's drum symbols. Then everyone, all in.
+    const plan = n === 0 ? [[3, null], [3, null]] : [[3, true], [3, true]]; // the band's drums + bass never drop out
     for (let i = 0; i < 8; i++) plan.push([i < 4 ? 3 : 4, false]);
     plan.forEach(([level, drumsOnly], i) => {
       const start = passStart + i * barLen;
       soon(start, () => {
         if (currentSong !== song) return;
-        if (drumsOnly === null) playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true });
+        if (drumsOnly === null) playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true, groove: true });
         else playBar(start, i, level, drumsOnly);
       });
     });
