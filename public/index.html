@@ -17,7 +17,6 @@
   <div id="stage"></div>
 
   <p id="status" hidden></p>
-  <p id="prompt" hidden></p>
   <div id="key" hidden aria-label="letters you've learned"></div>
 
   <section id="title" class="panel">
@@ -86,16 +85,18 @@
   </section>
 
   <section id="write" class="panel bottom" hidden>
+    <p class="prompt" hidden></p>
     <h2 id="write-who"></h2>
     <form id="write-form" class="compose">
       <button id="mic" type="button" class="round" aria-label="speak your message" hidden>●</button>
-      <input id="message" maxlength="80" autocomplete="off" spellcheck="false" enterkeyhint="send" placeholder="write a message…">
+      <input id="message" maxlength="60" autocomplete="off" spellcheck="false" enterkeyhint="send" placeholder="write a message…">
       <button id="send" type="submit" class="round" aria-label="send">↑</button>
     </form>
     <p class="quiet-text"><span id="write-hint">enter to send</span> · <span id="write-count"></span></p>
   </section>
 
   <section id="waiting" class="panel bottom" hidden>
+    <p class="prompt" hidden></p>
     <h2 id="waiting-who">their turn</h2>
     <p id="waiting-note" class="quiet-text"></p>
   </section>

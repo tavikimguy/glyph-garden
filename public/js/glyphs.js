@@ -65,9 +65,9 @@ export function makeCipher(seed = Math.floor(Math.random() * 2 ** 31)) {
   return cipher;
 }
 
-// Anything else (punctuation, accents) becomes a dot.
+// Anything else (punctuation, accents) becomes a dot — one per character, big enough to see.
 export function encode(cipher, ch) {
-  return cipher[ch.toLowerCase()] || '·';
+  return cipher[ch.toLowerCase()] || '•';
 }
 
 export function randomSymbol() {

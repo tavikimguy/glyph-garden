@@ -17,6 +17,7 @@ import { promptFor } from './prompts.js';
 import { connect, newCode } from './online.js';
 
 const PER_PLAYER = 4; // messages each before the song
+const MAX_CHARS = 60; // per message (the room enforces the same limit)
 const TOTAL = PER_PLAYER * 2;
 // A small palette players pick from; COLORS holds each player's current pick.
 const PALETTE = {
@@ -130,10 +131,14 @@ function currentPlayer() {
   return state.messages.length % 2;
 }
 
+// The round's prompt sits right above the typing box (and on the "their turn" screen).
 function showRoundPrompt(on) {
   const visible = on && state.prompts;
-  $('prompt').hidden = !visible;
-  if (visible) $('prompt').textContent = promptFor(state.seed, Math.floor(state.messages.length / 2));
+  const text = visible ? promptFor(state.seed, Math.floor(state.messages.length / 2)) : '';
+  for (const el of document.querySelectorAll('.prompt')) {
+    el.hidden = !visible;
+    el.textContent = text;
+  }
 }
 
 function startWriting() {
@@ -151,8 +156,8 @@ function startWriting() {
   show('write');
   $('write-who').textContent = state.online ? 'your turn' : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
-  $('write-count').textContent = `message ${state.messages.length + 1} / ${TOTAL}`;
   $('message').value = '';
+  updateCount();
   $('message').style.caretColor = rgb(COLORS[player]);
   if (!matchMedia('(pointer: coarse)').matches) $('message').focus(); // don't pop the phone keyboard uninvited
 }
@@ -160,7 +165,7 @@ function startWriting() {
 function send() {
   if (state.phase !== 'write') return;
   stopListening();
-  const text = $('message').value.trim().replace(/\s+/g, ' ');
+  const text = cleanText($('message').value);
   if (!/[a-z0-9]/i.test(text)) {
     $('write-hint').textContent = 'Try some words.';
     return;
@@ -176,6 +181,14 @@ function send() {
   receive(currentPlayer(), text);
   // Add its words to the shared word log (online, the room does this itself).
   fetch('/api/words', { method: 'POST', body: JSON.stringify({ text }) }).catch(() => {});
+}
+
+// Phones "smarten" punctuation: "..." becomes one "…" character, quotes curl.
+// Turn them back into plain characters so every dot/dash becomes its own glyph.
+function cleanText(raw) {
+  return raw
+    .replace(/…/g, '...').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-')
+    .trim().replace(/\s+/g, ' ').slice(0, MAX_CHARS);
 }
 
 // A message enters the space: its glyphs are thrown in, then the game moves on.
@@ -285,12 +298,8 @@ function startFinale() {
   state.dna = songDNA(state.messages);
   const song = playFinale(state.messages, state.banks, state.dna, {
     onMessage(m) {
-      if (state.focus >= 0) {
-        decode(state.focus, Infinity);
-        glyphsOf(state.focus).forEach((g) => { g.mode = 'form'; }); // back into the dance
-      }
-      state.focus = m;
-      glyphsOf(m).forEach((g) => { g.mode = 'stage'; });
+      if (state.focus >= 0) decode(state.focus, Infinity);
+      state.focus = m; // its glyphs light up where they are; the lyric shows centre stage
       // A new move every two messages, alternating patterns and pictures.
       if (m % 2 === 0) startFormation(nextDance(m % 4 === 0 ? 'pattern' : 'picture'));
     },
@@ -374,9 +383,14 @@ let P = null; // the p5 instance
 // Player 2 from the right. Physics takes it from there.
 // Returns ms until the spray has settled into drifting.
 function spawnMessage(msg, m) {
+  // Wide screens: player 1 from the left, player 2 from the right.
+  // Tall phone screens: your words rise from the bottom, theirs fall from the top.
+  const portrait = P.height > P.width;
+  const mine = state.online ? msg.player === state.online.me : msg.player === 0;
   const fromLeft = msg.player === 0;
-  const originY = P.height * (0.25 + Math.random() * 0.5);
-  const aim = (Math.random() - 0.5) * 0.5; // the whole throw angles up or down a bit
+  const fromBottom = mine;
+  const origin = portrait ? P.width * (0.25 + Math.random() * 0.5) : P.height * (0.25 + Math.random() * 0.5);
+  const aim = (Math.random() - 0.5) * 0.5; // the whole throw angles a little
   const now = P.millis();
 
   let wi = 0;
@@ -384,7 +398,13 @@ function spawnMessage(msg, m) {
   [...msg.text].forEach((ch, col) => {
     if (ch === ' ') { wi++; return; }
     const angle = aim + (Math.random() - 0.5) * 0.6;
-    const speed = 380 + Math.random() * 420;
+    const speed = (portrait ? 0.75 : 1) * (380 + Math.random() * 420);
+    const spread = (Math.random() - 0.5) * 60;
+    const start = portrait
+      ? { x: origin + spread, y: fromBottom ? P.height + 20 : -20 }
+      : { x: fromLeft ? -20 : P.width + 20, y: origin + spread };
+    const dirX = portrait ? Math.sin(angle) : Math.cos(angle) * (fromLeft ? 1 : -1);
+    const dirY = portrait ? Math.cos(angle) * (fromBottom ? -1 : 1) : Math.sin(angle);
     state.glyphs.push({
       ch,
       sym: encode(state.cipher, ch),
@@ -393,10 +413,10 @@ function spawnMessage(msg, m) {
       wi,
       col,
       len: msg.text.length,
-      x: fromLeft ? -20 : P.width + 20,
-      y: originY + (Math.random() - 0.5) * 60,
-      vx: Math.cos(angle) * speed * (fromLeft ? 1 : -1),
-      vy: Math.sin(angle) * speed,
+      x: start.x,
+      y: start.y,
+      vx: dirX * speed,
+      vy: dirY * speed,
       mode: 'thrown',
       entered: false,
       launched: false,
@@ -424,11 +444,62 @@ function glyphSize() {
   return Math.max(18, Math.min(30, Math.min(P.width, P.height) * 0.032));
 }
 
-// Centre stage during the song: the message being sung, big, spaced like text.
+// Centre stage during the song: the message being sung, big, wrapped onto as
+// many lines as it needs (shrinking a little if it's long), like song lyrics.
 const STAGE_SCALE = 1.6;
+let stageCache = null;
+
+function stageLayout(m) {
+  const key = `${m}:${P.width}:${P.height}`;
+  if (stageCache?.key === key) return stageCache;
+  const text = state.messages[m].text;
+  let size = glyphSize() * STAGE_SCALE;
+  let lines;
+  for (;;) {
+    const perLine = Math.max(4, Math.floor((P.width * 0.88) / (size * 0.68)));
+    lines = wrapWords(text, perLine);
+    if (lines.length * size * 1.3 <= P.height * 0.5 || size <= 16) break;
+    size *= 0.9;
+  }
+  const charW = size * 0.68;
+  const lineH = size * 1.3;
+  const pos = {};
+  lines.forEach((line, li) => {
+    const y = P.height / 2 + (li - (lines.length - 1) / 2) * lineH;
+    line.cols.forEach((col, i) => {
+      pos[col] = { x: P.width / 2 + (i - (line.cols.length - 1) / 2) * charW, y };
+    });
+  });
+  stageCache = { key, size, pos };
+  return stageCache;
+}
+
+// Greedy word wrap. Returns lines as lists of character positions in the text;
+// a word longer than a whole line gets split.
+function wrapWords(text, perLine) {
+  const lines = [];
+  let cols = [];
+  let col = 0;
+  for (const word of text.split(' ')) {
+    const wordCols = [...word].map((_, i) => col + i);
+    col += [...word].length + 1;
+    for (let start = 0; start < wordCols.length; start += perLine) {
+      const piece = wordCols.slice(start, start + perLine);
+      if (cols.length && cols.length + 1 + piece.length > perLine) {
+        lines.push({ cols });
+        cols = [];
+      }
+      if (cols.length) cols.push(null); // the space between words
+      cols.push(...piece);
+    }
+  }
+  if (cols.length) lines.push({ cols });
+  // turn space placeholders into real gaps
+  return lines.map((line) => ({ cols: line.cols.map((c, i) => (c === null ? `gap${i}` : c)) }));
+}
+
 function stageOf(g) {
-  const charW = Math.min(glyphSize() * 0.68 * STAGE_SCALE, (P.width * 0.9) / g.len);
-  return { x: P.width / 2 + (g.col - (g.len - 1) / 2) * charW, y: P.height / 2 };
+  return stageLayout(g.msg).pos[g.col] || { x: P.width / 2, y: P.height / 2 };
 }
 
 // Between rounds the glyphs band together into a moving pattern or a picture
@@ -448,6 +519,40 @@ function nextDance(kind) {
   return deck.pop();
 }
 
+// Colour words: say "blue" and the next picture is dyed blue — and stays blue.
+const COLOR_WORDS = {
+  red: [255, 90, 90], crimson: [220, 40, 70], orange: [255, 160, 70], yellow: [255, 230, 90],
+  gold: [255, 205, 80], green: [110, 230, 120], lime: [180, 255, 90], teal: [70, 210, 190],
+  turquoise: [80, 230, 210], cyan: [90, 230, 255], blue: [90, 150, 255], navy: [90, 110, 220],
+  indigo: [120, 100, 255], purple: [180, 110, 255], violet: [200, 130, 255], lavender: [200, 180, 255],
+  pink: [255, 140, 200], magenta: [255, 80, 220], brown: [190, 130, 90], white: [250, 250, 255],
+  silver: [200, 210, 225], grey: [150, 155, 170], gray: [150, 155, 170], black: [95, 95, 110],
+  rainbow: 'rainbow',
+};
+
+// The most recent colour word said in the conversation (or null).
+function latestColor() {
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const words = state.messages[i].text.toLowerCase().match(/[a-z]+/g) || [];
+    for (let j = words.length - 1; j >= 0; j--) if (COLOR_WORDS[words[j]]) return COLOR_WORDS[words[j]];
+  }
+  return null;
+}
+
+function hueToRgb(h) {
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    return Math.round(255 * (0.65 - 0.35 * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+  };
+  return [f(0), f(8), f(4)];
+}
+
+// A glyph's colour: its dye if a picture coloured it, else its player's colour.
+function tintOf(g, now) {
+  if (g.tint === 'rainbow') return hueToRgb((g.fi * 9 + now / 25) % 360);
+  return g.tint || COLORS[g.player];
+}
+
 function startFormation(name) {
   const counts = [0, 0];
   const msgSize = [];
@@ -458,6 +563,8 @@ function startFormation(name) {
     msgSize[g.msg] = g.fm + 1;
     if (g.mode !== 'stage') g.mode = 'form';
   });
+  const dye = PICTURE_WORDS[name] ? latestColor() : null;
+  if (dye) state.glyphs.forEach((g) => { g.tint = dye; }); // the picture takes the colour, for good
   state.formation = {
     name,
     pattern: FORMATIONS[name],
@@ -498,7 +605,7 @@ function updateGlyphs(dt, t, now) {
       g.vy *= drag;
       g.x += g.vx * dt;
       g.y += g.vy * dt;
-      if (!g.entered && g.x > 14 && g.x < W - 14) g.entered = true;
+      if (!g.entered && g.x > 14 && g.x < W - 14 && g.y > 14 && g.y < H - 14) g.entered = true;
       if (g.entered) bounceWalls(g, W, H);
       if (Math.hypot(g.vx, g.vy) < 40) {
         g.mode = 'free';
@@ -562,7 +669,7 @@ function updateGlyphs(dt, t, now) {
         bump(a.sym + b.sym, strength);
         state.ripples.push({
           x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, born: now,
-          color: COLORS[a.player], strength: 0.5 + strength * 0.5, rings: 2,
+          color: tintOf(a, now), strength: 0.5 + strength * 0.5, rings: 2,
         });
         a.flash = Math.max(a.flash, 0.5);
         b.flash = Math.max(b.flash, 0.5);
@@ -654,7 +761,7 @@ function sketch(p) {
       if (a.msg !== b.msg || a.wi !== b.wi || now < a.born || now < b.born) continue;
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (d > size * 5) continue;
-      p.stroke(...COLORS[b.player], 30 * (1 - d / (size * 5)) * alphaOf(b));
+      p.stroke(...tintOf(b, now), 30 * (1 - d / (size * 5)) * alphaOf(b));
       p.line(a.x, a.y, b.x, b.y);
     }
 
@@ -664,13 +771,13 @@ function sketch(p) {
     const pulse = beatPulse();
     for (const g of state.glyphs) {
       if (now < g.born) continue;
-      const [r, gg, b] = COLORS[g.player];
-      const decoded = g.decodeAt !== null && now >= g.decodeAt + SCRAMBLE_MS;
+      const [r, gg, b] = tintOf(g, now);
+      const decoded = g.decodeAt !== null && now >= g.decodeAt + SCRAMBLE_MS && !g.tint;
       const glow = Math.max(g.flash, decoded ? 0.35 : 0);
       ctx.shadowBlur = glow > 0.05 && !SMALL_SCREEN ? 6 + glow * 18 : 0; // glow is costly on phones
       ctx.shadowColor = `rgba(${r}, ${gg}, ${b}, ${0.8 * glow})`;
       p.fill(decoded ? 245 : r, decoded ? 245 : gg, decoded ? 250 : b, 255 * alphaOf(g));
-      const scale = g.mode === 'stage' ? STAGE_SCALE : 1 + pulse * 0.18;
+      const scale = 1 + pulse * 0.18;
       // Feelings leak through: happy glyphs hop, excited ones spin, sad ones dim and shrink.
       let hop = 0;
       let spin = 0;
@@ -692,13 +799,35 @@ function sketch(p) {
       g.flash *= 0.93;
     }
     ctx.shadowBlur = 0;
+    drawLyric(p, now);
   };
 }
 
-// During the song, the message being sung is bright and the rest dim.
+// During the song, the message being sung is bright and the rest a little dimmer
+// (not too dim — they still have to draw the shape).
 function alphaOf(g) {
   if (state.focus < 0) return 0.9;
-  return g.msg === state.focus ? 1 : 0.4;
+  return g.msg === state.focus ? 1 : 0.6;
+}
+
+// The lyric being sung, as readable text in the middle (wrapped onto lines),
+// decoding letter by letter in sync with the glyphs out in the shape.
+function drawLyric(p, now) {
+  if (!state.song || state.focus < 0) return;
+  const layout = stageLayout(state.focus);
+  const ctx = p.drawingContext;
+  p.textSize(layout.size);
+  ctx.shadowBlur = SMALL_SCREEN ? 0 : 14;
+  for (const g of glyphsOf(state.focus)) {
+    const { x, y } = layout.pos[g.col] || {};
+    if (x === undefined) continue;
+    const [r, gg, b] = tintOf(g, now);
+    ctx.shadowColor = `rgba(${r}, ${gg}, ${b}, 0.6)`;
+    const decoded = g.decodeAt !== null && now >= g.decodeAt + SCRAMBLE_MS;
+    p.fill(decoded ? 250 : r, decoded ? 250 : gg, decoded ? 252 : b, 255);
+    p.text(face(g, now), x, y);
+  }
+  ctx.shadowBlur = 0;
 }
 
 // ───────────────────────── wiring ─────────────────────────
@@ -781,7 +910,15 @@ $('write-form').addEventListener('submit', (e) => {
   send();
 });
 let lastTyping = 0;
+// "message 3/8 · 12/60" under the box; turns gold near the limit.
+function updateCount() {
+  const used = cleanText($('message').value).length;
+  $('write-count').textContent = `message ${state.messages.length + 1}/${TOTAL} · ${used}/${MAX_CHARS}`;
+  $('write-count').classList.toggle('near', used >= MAX_CHARS - 10);
+}
+
 $('message').addEventListener('input', () => {
+  updateCount();
   if (state.online && Date.now() - lastTyping > 1500) {
     lastTyping = Date.now();
     state.online.conn.send({ type: 'typing' });
@@ -982,7 +1119,8 @@ if (Recognition) {
     rec.lang = navigator.language || 'en-US';
     rec.interimResults = true;
     rec.onresult = (e) => {
-      $('message').value = [...e.results].map((r) => r[0].transcript).join('').slice(0, 80);
+      $('message').value = cleanText([...e.results].map((r) => r[0].transcript).join(''));
+      updateCount();
     };
     rec.onend = () => stopListening();
     rec.onerror = () => stopListening();
@@ -992,6 +1130,20 @@ if (Recognition) {
     $('write-hint').textContent = 'listening… tap ● to stop';
   });
 }
+
+// ───────────────────────── phone keyboard ─────────────────────────
+// When the keyboard opens, the visible part of the page shrinks. Measure how much
+// and lift the bottom panels by that amount, so the typing box stays in view.
+function fitKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  document.documentElement.style.setProperty('--keyboard', `${covered}px`);
+  window.scrollTo(0, 0); // iPhone likes to scroll the page under the keyboard; undo it
+}
+window.visualViewport?.addEventListener('resize', fitKeyboard);
+window.visualViewport?.addEventListener('scroll', fitKeyboard);
+$('message').addEventListener('focus', () => setTimeout(fitKeyboard, 300));
 
 // Opened from a shared link? Go straight to that duet's lobby.
 const roomFromLink = new URLSearchParams(location.search).get('room');

@@ -8,7 +8,7 @@ import { WordLog, wordsWorthCounting } from './words.js';
 export { WordLog };
 
 const TOTAL = 8; // messages per duet (4 each)
-const MAX_TEXT = 80;
+const MAX_TEXT = 60; // characters per message (the game's box allows the same)
 const CODE = /^[A-Z0-9]{4,8}$/;
 
 export default {

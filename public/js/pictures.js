@@ -182,7 +182,7 @@ export const PICTURE_WORDS = {
   star: ['star', 'stars', 'starry'],
   sun: ['sun', 'sunny', 'sunshine', 'sunrise', 'sunset'],
   note: ['music', 'song', 'songs', 'sing', 'singing', 'note'],
-  cat: ['cat', 'cats', 'kitty', 'kitten'],
+  cat: ['cat', 'cats', 'kitty', 'kitten', 'miami', 'jade'],
   boat: ['boat', 'sail', 'sailing', 'ship', 'sea', 'ocean'],
   eye: ['eye', 'eyes', 'see', 'look', 'looking', 'watch'],
   tree: ['tree', 'trees', 'forest', 'woods'],
