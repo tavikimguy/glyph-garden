@@ -80,6 +80,21 @@ const INSTRUMENTS = {
   synth: { base: 400, make: () => new Tone.MonoSynth({ oscillator: { type: 'square' }, portamento: 0.04, filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.5, baseFrequency: 800, octaves: 2 }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.7, release: 0.1 }, volume: -16 }) },
   musicbox: { base: 700, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 5, modulationIndex: 4, envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 0.8 }, modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }, volume: -10 }) },
   steelpan: { base: 400, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 2.5, modulationIndex: 3, envelope: { attack: 0.002, decay: 0.5, sustain: 0.1, release: 0.4 }, modulationEnvelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.2 }, volume: -8 }) },
+  // plucked strings
+  harp: { base: 330, make: () => new Tone.PluckSynth({ attackNoise: 0.6, dampening: 6000, resonance: 0.995, volume: -2 }) },
+  banjo: { base: 300, make: () => new Tone.PluckSynth({ attackNoise: 3, dampening: 7000, resonance: 0.9, volume: -4 }), fx: () => [new Tone.Filter(250, 'highpass')] },
+  koto: { base: 400, make: () => new Tone.PluckSynth({ attackNoise: 1.5, dampening: 4500, resonance: 0.98, volume: -3 }), fx: () => [new Tone.Vibrato(4, 0.05)] },
+  sitar: { base: 250, make: () => new Tone.PluckSynth({ attackNoise: 2.5, dampening: 5000, resonance: 0.99, volume: -5 }), fx: () => [new Tone.Distortion(0.15), new Tone.Vibrato(6, 0.08)] },
+  // mallets
+  marimba: { base: 350, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 4, modulationIndex: 2, envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.5 }, modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }, volume: -8 }) },
+  // bowed / blown / squeezed
+  cello: { base: 160, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsawtooth', count: 2, spread: 8 }, envelope: { attack: 0.15, decay: 0.1, sustain: 0.9, release: 0.4 }, volume: -14 }), fx: () => [new Tone.Vibrato(5, 0.1), new Tone.Filter(1800, 'lowpass')] },
+  trumpet: { base: 330, make: () => new Tone.MonoSynth({ oscillator: { type: 'sawtooth' }, filter: { Q: 1 }, filterEnvelope: { attack: 0.03, decay: 0.2, sustain: 0.7, baseFrequency: 500, octaves: 2.5 }, envelope: { attack: 0.02, decay: 0.1, sustain: 0.85, release: 0.15 }, volume: -13 }) },
+  clarinet: { base: 250, make: () => new Tone.MonoSynth({ oscillator: { type: 'square' }, filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.8, baseFrequency: 900, octaves: 1 }, envelope: { attack: 0.04, decay: 0.1, sustain: 0.9, release: 0.15 }, volume: -15 }) },
+  accordion: { base: 280, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsawtooth', count: 3, spread: 15 }, envelope: { attack: 0.05, decay: 0.1, sustain: 0.9, release: 0.2 }, volume: -17 }), fx: () => [new Tone.Tremolo(6, 0.3).start(), new Tone.Filter(2500, 'lowpass')] },
+  harmonica: { base: 400, make: () => new Tone.MonoSynth({ oscillator: { type: 'square' }, filterEnvelope: { attack: 0.03, decay: 0.2, sustain: 0.8, baseFrequency: 1200, octaves: 1 }, envelope: { attack: 0.03, decay: 0.1, sustain: 0.85, release: 0.15 }, volume: -16 }), fx: () => [new Tone.Tremolo(5, 0.15).start()] },
+  ocarina: { base: 600, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.05, decay: 0.1, sustain: 0.8, release: 0.2 }, volume: -6 }), fx: () => [new Tone.Vibrato(4.5, 0.06)] },
+  theremin: { base: 440, make: () => new Tone.MonoSynth({ oscillator: { type: 'sine' }, portamento: 0.12, envelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 0.3 }, filterEnvelope: { baseFrequency: 4000, octaves: 0 }, volume: -6 }), fx: () => [new Tone.Vibrato(6, 0.15)] },
 };
 
 export const VOICE_GROUPS = { instruments: Object.keys(INSTRUMENTS), voices: Object.keys(ROBOTS) };
@@ -432,6 +447,30 @@ function playInstrument(voice, time, freq, dur) {
   e.last = t + dur;
 }
 
+// A spoken message, sung: syllable n of the recording, stretched to fit the note's
+// length and tuned to the melody note — your real words, in your own (autotuned) voice.
+// sung = { buffer, segments: [{ start, end, pitch }] } from voicebank.prepareSung.
+function singRecorded(sung, n, time, freq, dur, reverse = false) {
+  const seg = sung.segments[Math.min(n, sung.segments.length - 1)];
+  const len = Math.max(0.05, seg.end - seg.start);
+  const cents = seg.pitch ? Math.max(-1200, Math.min(1200, 1200 * Math.log2(freq / seg.pitch))) : 0;
+  const total = sung.buffer.duration;
+  const player = new Tone.GrainPlayer({
+    url: sung.buffer,
+    grainSize: 0.06,
+    overlap: 0.03,
+    detune: cents,
+    playbackRate: Math.min(2, Math.max(0.5, len / dur)), // speed changes length, not pitch
+    reverse,
+    loop: true,
+    loopStart: reverse ? total - seg.end : seg.start,
+    loopEnd: reverse ? total - seg.start : seg.end,
+  }).connect(fx.recordedIn);
+  player.start(time, reverse ? total - seg.end : seg.start);
+  player.stop(time + dur);
+  at(time + dur + 1, () => player.dispose());
+}
+
 // voice = a recorded bank ({ clips }), a robot ({ robot: 'silk' }) or an instrument ({ instrument: 'guitar' }).
 function sing(voice, syl, time, freq, dur, reverse = false) {
   if (voice?.clips) singFromBank(voice, syl, time, freq, dur, reverse);
@@ -456,12 +495,15 @@ export function playInterlude(items, voices, clarity, onSyllable) {
 
   let t = t0 + 0.4;
   picked.forEach((item, n) => {
-    const scale = scaleFor(voices[item.player]?.basePitch);
+    const scale = scaleFor(item.message?.sung?.basePitch || voices[item.player]?.basePitch);
     const freq = scale[hash(item.syl.char + n) % scale.length];
     const dur = 0.17 + Math.random() * 0.12;
     const when = t;
     const reverse = Math.random() < (1 - clarity) * 0.6;
-    soon(when, () => sing(voices[item.player], item.syl, when, freq, dur, reverse));
+    soon(when, () => {
+      if (item.message?.sung) singRecorded(item.message.sung, item.n, when, freq, dur, reverse);
+      else sing(voices[item.player], item.syl, when, freq, dur, reverse);
+    });
     at(t, () => onSyllable(item));
     t += dur + (Math.random() - 0.3) * 0.15 * (1 - clarity);
   });
@@ -626,7 +668,7 @@ function schedulePass(song, passStart, pass) {
   messages.forEach((msg, m) => {
     t = onBeat(t);
     const voice = voices[msg.player];
-    const scale = scaleFor(voice?.basePitch, dna);
+    const scale = scaleFor(msg.sung?.basePitch || voice?.basePitch, dna); // a spoken message sings near its speaker's pitch
     const syls = msg.words.flatMap((w, wi) => w.syllables.map((s, si) => ({ s, wi, si })));
     const notes = melody(syls.length, scale.length, hash(msg.words.map((w) => w.word).join(' ')) ^ dna.seed);
     const steps = syls.length > 14 ? 1 : 2; // long messages sing in 16ths so they don't drag
@@ -637,7 +679,10 @@ function schedulePass(song, passStart, pass) {
       const len = (n === syls.length - 1 ? 4 : steps) * six;
       const when = t;
       const freq = scale[notes[n]];
-      soon(when, () => sing(voice, s, when, freq, len * 0.95));
+      soon(when, () => {
+        if (msg.sung) singRecorded(msg.sung, n, when, freq, len * 0.95);
+        else sing(voice, s, when, freq, len * 0.95);
+      });
       at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
       t += len;
     });

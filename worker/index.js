@@ -9,6 +9,7 @@ export { WordLog };
 
 const TOTAL = 8; // messages per duet (4 each)
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
+const MAX_VOICE = 400_000; // a spoken message's recording, base64 (8 s of compressed audio is far less)
 const CODE = /^[A-Z0-9]{4,8}$/;
 // Starting picks for a new player: the first ones the other player isn't using.
 const DEFAULT_VOICES = ['guitar', 'keys', 'flute', 'violin'];
@@ -88,6 +89,10 @@ export class Room extends DurableObject {
     await this.save();
 
     server.send(JSON.stringify({ type: 'welcome', you: slot, room: this.publicRoom() }));
+    // Someone (re)joining also gets the recordings of any spoken messages so far.
+    for (const [key, voice] of await this.ctx.storage.list({ prefix: 'voice:' })) {
+      server.send(JSON.stringify({ type: 'voice', index: Number(key.slice(6)), ...voice }));
+    }
     this.broadcast({ type: 'room', room: this.publicRoom() });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -103,9 +108,15 @@ export class Room extends DurableObject {
       const yourTurn = room.messages.length % 2 === slot;
       if (!text || !yourTurn || room.messages.length >= TOTAL) return;
       room.messages.push({ player: slot, text });
+      const index = room.messages.length - 1;
+      // A spoken message's recording: kept apart from the text, sent to both phones.
+      const voice = typeof msg.voice?.data === 'string' && msg.voice.data.length <= MAX_VOICE
+        ? { data: msg.voice.data, mime: String(msg.voice.mime || 'audio/webm').slice(0, 40) }
+        : undefined;
+      if (voice) await this.ctx.storage.put(`voice:${index}`, voice);
       await this.save();
       await this.env.WORDS.getByName('global').record(wordsWorthCounting(text));
-      this.broadcast({ type: 'said', player: slot, text, index: room.messages.length - 1 });
+      this.broadcast({ type: 'said', player: slot, text, index, voice });
     } else if (msg.type === 'settings') {
       const me = room.players[slot];
       if (!me) return;
@@ -126,6 +137,7 @@ export class Room extends DurableObject {
     } else if (msg.type === 'again') {
       room.messages = [];
       room.seed = Math.floor(Math.random() * 2 ** 31);
+      await this.ctx.storage.delete([...(await this.ctx.storage.list({ prefix: 'voice:' })).keys()]);
       await this.save();
       this.broadcast({ type: 'reset', room: this.publicRoom() });
     }

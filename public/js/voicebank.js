@@ -81,8 +81,9 @@ export async function openMic() {
 }
 
 // Start recording; call the returned stop() to get an AudioBuffer.
-export function startRecording(stream) {
-  const recorder = new MediaRecorder(stream);
+// Start recording; call the returned stop() to get an AudioBuffer (and .blob, the raw file).
+export function startRecording(stream, bitsPerSecond) {
+  const recorder = new MediaRecorder(stream, bitsPerSecond ? { audioBitsPerSecond: bitsPerSecond } : undefined);
   const chunks = [];
   recorder.ondataavailable = (e) => chunks.push(e.data);
   recorder.start();
@@ -93,7 +94,9 @@ export function startRecording(stream) {
           try {
             const blob = new Blob(chunks, { type: recorder.mimeType });
             const data = await blob.arrayBuffer();
-            resolve(await Tone.getContext().rawContext.decodeAudioData(data));
+            const audio = await Tone.getContext().rawContext.decodeAudioData(data);
+            audio.blob = blob; // keep the compressed file too, to send to the other phone
+            resolve(audio);
           } catch (err) {
             reject(err);
           }
@@ -196,4 +199,59 @@ export function finishBank(clips) {
   const pitches = Object.values(clips).map((c) => c.pitch).filter(Boolean).sort((a, b) => a - b);
   const basePitch = pitches.length ? pitches[Math.floor(pitches.length / 2)] : 180;
   return { clips, basePitch };
+}
+
+// ── a spoken message, ready to be sung ──
+// Trim the silence, cut the recording into one piece per syllable (cutting at the
+// quiet dips between sounds), and find each piece's pitch so it can be tuned.
+export function prepareSung(audioBuffer, syllableCount) {
+  const sr = audioBuffer.sampleRate;
+  const raw = audioBuffer.getChannelData(0);
+  const hop = Math.floor(sr * 0.01);
+  const energy = [];
+  for (let i = 0; i + hop <= raw.length; i += hop) {
+    let sum = 0;
+    for (let j = i; j < i + hop; j++) sum += raw[j] * raw[j];
+    energy.push(Math.sqrt(sum / hop));
+  }
+  const peak = Math.max(...energy, 0);
+  if (peak < 0.01 || !syllableCount) return null;
+  const threshold = Math.max(0.006, peak * 0.08);
+  const first = energy.findIndex((v) => v > threshold);
+  const last = energy.length - 1 - [...energy].reverse().findIndex((v) => v > threshold);
+  const buffer = copySegment(raw, first * hop, Math.min(raw.length, (last + 2) * hop), sr);
+  const frames = energy.slice(first, last + 2);
+
+  // Smooth the loudness so tiny wobbles don't count as gaps between syllables.
+  const smooth = frames.map((_, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let k = Math.max(0, i - 3); k <= Math.min(frames.length - 1, i + 3); k++) { sum += frames[k]; n++; }
+    return sum / n;
+  });
+
+  // Ideal cuts are evenly spaced; slide each to the quietest moment nearby.
+  const per = frames.length / syllableCount;
+  const cuts = [0];
+  for (let k = 1; k < syllableCount; k++) {
+    const ideal = Math.round(k * per);
+    let best = ideal;
+    for (let f = Math.max(cuts[cuts.length - 1] + 2, Math.round(ideal - per * 0.35)); f <= Math.min(frames.length - 2, Math.round(ideal + per * 0.35)); f++) {
+      if (smooth[f] < smooth[best]) best = f;
+    }
+    cuts.push(Math.max(cuts[cuts.length - 1] + 1, best));
+  }
+  cuts.push(frames.length);
+
+  const data = buffer.getChannelData(0);
+  const segments = [];
+  for (let k = 0; k < syllableCount; k++) {
+    const start = (cuts[k] * hop) / sr;
+    const end = Math.max(start + 0.05, (cuts[k + 1] * hop) / sr);
+    const piece = data.subarray(Math.floor(start * sr), Math.min(data.length, Math.floor(end * sr)));
+    segments.push({ start, end: Math.min(end, buffer.duration), pitch: piece.length > 800 ? detectPitch(piece, sr) : null });
+  }
+  const pitches = segments.map((x) => x.pitch).filter(Boolean).sort((a, b) => a - b);
+  const basePitch = pitches.length ? pitches[Math.floor(pitches.length / 2)] : 180;
+  return { buffer, segments, basePitch };
 }

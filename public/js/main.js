@@ -7,7 +7,7 @@ import { translate } from './hangul.js';
 import { makeCipher, encode, randomSymbol, hash, seededRandom } from './glyphs.js';
 import { FORMATIONS, PATTERN_NAMES } from './formations.js';
 import { PICTURE_WORDS } from './pictures.js';
-import { PROMPTS, openMic, startRecording, processClip, finishBank } from './voicebank.js';
+import { PROMPTS, openMic, startRecording, processClip, finishBank, prepareSung } from './voicebank.js';
 import {
   initAudio, plink, bump, playInterlude, playFinale, previewClip, previewVoice, setClarity, setAmbient, stopAll,
   VOICE_GROUPS, robotVoice, setKey, newChimes,
@@ -51,6 +51,8 @@ const state = {
   online: null, // { code, conn, me, room } when playing a duet across two phones
   started: false, // has this phone entered the garden yet?
   inbox: [], // messages from the room waiting their turn to fly in
+  spoken: null, // the recording of the message being written (if they spoke it)
+  lateVoices: {}, // recordings that arrived before their message did (rejoining)
   revealed: new Set(), // letters whose real identity has been revealed (one per message)
   prompts: false, // shared-prompt mode (the host's choice online)
   seed: Math.floor(Math.random() * 2 ** 31), // this duet's seed: glyphs + prompts
@@ -156,14 +158,18 @@ function startWriting() {
   $('write-who').textContent = state.online ? 'your turn' : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
   $('message').value = '';
+  state.spoken = null;
+  $('mic').classList.remove('voiced');
+  $('write-hint').classList.remove('show');
+  $('write-hint').textContent = 'enter to send';
   updateCount();
   $('message').style.caretColor = rgb(COLORS[player]);
   if (!matchMedia('(pointer: coarse)').matches) $('message').focus(); // don't pop the phone keyboard uninvited
 }
 
-function send() {
+async function send() {
   if (state.phase !== 'write') return;
-  stopListening();
+  await stopSpeaking(); // tapped send mid-sentence? keep what was recorded
   const text = cleanText($('message').value);
   if (!/[a-z0-9]/i.test(text)) {
     $('write-hint').textContent = 'Try some words.';
@@ -174,10 +180,11 @@ function send() {
     // Send it to the room; it comes back to both phones as 'said', in order.
     state.phase = 'sending';
     show(null);
-    state.online.conn.send({ type: 'say', text });
+    const voice = state.spoken ? await encodeVoice(state.spoken.blob) : undefined;
+    state.online.conn.send({ type: 'say', text, voice });
     return;
   }
-  receive(currentPlayer(), text);
+  receive(currentPlayer(), text, false, state.spoken);
   // Add its words to the shared word log (online, the room does this itself).
   fetch('/api/words', { method: 'POST', body: JSON.stringify({ text }) }).catch(() => {});
 }
@@ -192,7 +199,7 @@ function cleanText(raw) {
 
 // A message enters the space: its glyphs are thrown in, then the game moves on.
 // quiet = catching up after (re)joining: no interlude, just put the glyphs in.
-function receive(player, text, quiet = false) {
+function receive(player, text, quiet = false, voice = null) {
   // Each word keeps its sounds (for singing) next to its letters (for glyphs).
   const words = text.split(' ').map((word) => ({
     word,
@@ -200,6 +207,8 @@ function receive(player, text, quiet = false) {
   }));
   const msg = { player, text, words };
   state.messages.push(msg);
+  const late = state.lateVoices[state.messages.length - 1];
+  if (voice || late) attachVoice(msg, voice || late);
   setKey(songDNA(state.messages)); // the space drifts into the conversation's key
   const landing = spawnMessage(msg, state.messages.length - 1);
   revealLetter(text, quiet ? 0 : landing + 400);
@@ -243,8 +252,34 @@ function showKey(fresh) {
 }
 
 function receiveNext() {
-  const { player, text } = state.inbox.shift();
-  receive(player, text);
+  const { player, text, voice } = state.inbox.shift();
+  receive(player, text, false, voice);
+}
+
+// ── a spoken message's recording ──
+// voice = { audio } (recorded on this phone) or { data, mime } (sent through the room).
+async function attachVoice(msg, voice) {
+  try {
+    const audio = voice.audio || await decodeVoice(voice);
+    const count = msg.words.reduce((n, w) => n + w.syllables.length, 0);
+    msg.sung = prepareSung(audio, count); // ready for the interlude and the song
+  } catch (err) {
+    console.warn('could not use that recording', err);
+  }
+}
+
+function encodeVoice(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ data: String(reader.result).split(',')[1], mime: blob.type || 'audio/webm' });
+    reader.onerror = () => resolve(undefined);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function decodeVoice({ data, mime }) {
+  const bytes = await (await fetch(`data:${mime};base64,${data}`)).arrayBuffer();
+  return Tone.getContext().rawContext.decodeAudioData(bytes);
 }
 
 function afterSend() {
@@ -257,9 +292,11 @@ function afterSend() {
   const round = n / 2;
   const items = [];
   for (let m = n - 2; m < n; m++) {
-    state.messages[m].words.forEach((w, wi) => {
+    const message = state.messages[m];
+    let k = 0;
+    message.words.forEach((w, wi) => {
       const glyphs = glyphsOf(m, wi);
-      w.syllables.forEach((syl) => items.push({ syl, player: state.messages[m].player, glyphs }));
+      w.syllables.forEach((syl) => items.push({ syl, player: message.player, glyphs, message, n: k++ }));
     });
   }
   const seconds = playInterlude(items, state.banks, (round / PER_PLAYER) * 0.7, (item) => {
@@ -1046,6 +1083,10 @@ function onRoom(msg) {
     }
     if (state.messages.length + state.inbox.length > msg.index) return; // already have it
     state.inbox.push(msg);
+  } else if (msg.type === 'voice') {
+    const voice = { data: msg.data, mime: msg.mime };
+    if (state.messages[msg.index]) attachVoice(state.messages[msg.index], voice);
+    else state.lateVoices[msg.index] = voice;
     if (state.phase === 'their-turn' || state.phase === 'sending') receiveNext();
   } else if (msg.type === 'typing') {
     if (state.phase === 'their-turn') {
@@ -1120,22 +1161,27 @@ $('my-colors').addEventListener('click', (e) => {
   if (color && !e.target.disabled) state.online?.conn.send({ type: 'settings', color });
 });
 
-// ───────────────────────── speak your message ─────────────────────────
-// Uses the browser's built-in speech-to-text (Chrome, Safari on iPhone). It fills
-// the box; you can fix it up before sending.
+// ───────────────────────── speak (and sing) your message ─────────────────────────
+// Tap ● and talk: your voice is recorded (so the song can sing your actual words,
+// autotuned) and, where the browser can, turned into text in the box to fix up.
+// Tap ● again (or send) to finish. Max 8 seconds.
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let listening = null;
+const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+let listening = null; // { rec, recorder, timer } while the mic is on
 
-function stopListening() {
-  listening?.stop();
-  listening = null;
-  $('mic').classList.remove('on');
-}
-
-if (Recognition) {
-  $('mic').hidden = false;
-  $('mic').addEventListener('click', () => {
-    if (listening) return stopListening();
+async function startSpeaking() {
+  $('mic').classList.add('on');
+  $('write-hint').classList.add('show');
+  $('write-hint').textContent = 'listening… tap ● when you’re done';
+  listening = { rec: null, recorder: null, timer: setTimeout(stopSpeaking, 8000) };
+  const session = listening;
+  if (canRecord) {
+    try {
+      state.mic ??= await openMic();
+      if (listening === session) session.recorder = startRecording(state.mic, 32000);
+    } catch { /* no microphone: words only */ }
+  }
+  if (Recognition && listening === session) {
     const rec = new Recognition();
     rec.lang = navigator.language || 'en-US';
     rec.interimResults = true;
@@ -1143,13 +1189,32 @@ if (Recognition) {
       $('message').value = cleanText([...e.results].map((r) => r[0].transcript).join(''));
       updateCount();
     };
-    rec.onend = () => stopListening();
-    rec.onerror = () => stopListening();
-    rec.start();
-    listening = rec;
-    $('mic').classList.add('on');
-    $('write-hint').textContent = 'listening… tap ● to stop';
-  });
+    rec.onerror = () => {}; // e.g. it can't share the mic on some phones — the recording still counts
+    try { rec.start(); session.rec = rec; } catch { /* ignore */ }
+  }
+}
+
+async function stopSpeaking() {
+  if (!listening) return;
+  const { rec, recorder, timer } = listening;
+  listening = null;
+  clearTimeout(timer);
+  $('mic').classList.remove('on');
+  try { rec?.stop(); } catch { /* already stopped */ }
+  if (!recorder) return;
+  try {
+    const audio = await recorder.stop();
+    state.spoken = { audio, blob: audio.blob };
+    $('mic').classList.add('voiced');
+    $('write-hint').textContent = '♪ your voice will sing this — tap ● to redo';
+  } catch {
+    $('write-hint').textContent = 'couldn’t record that — try again, or just type';
+  }
+}
+
+if (Recognition || canRecord) {
+  $('mic').hidden = false;
+  $('mic').addEventListener('click', () => (listening ? stopSpeaking() : startSpeaking()));
 }
 
 // ───────────────────────── phone keyboard ─────────────────────────

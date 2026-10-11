@@ -168,7 +168,8 @@ html, body { position: fixed; inset: 0; overscroll-behavior: none; }
   #write.panel.bottom, #waiting.panel.bottom { width: calc(100% - 16px); padding: 8px 0 0; }
   #write h2, #waiting h2 { font-size: 13px; margin: 0 0 6px; }
   #write .quiet-text { margin: 4px 0 0; }
-  #write-hint { display: none; }
+  #write-hint:not(.show) { display: none; }
   body.typing #write.panel.bottom { bottom: calc(6px + var(--keyboard, 0px)); }
   body.typing #write .quiet-text { display: none; }
 }
+#mic.voiced { border-color: #ffd27a; color: #ffd27a; }
