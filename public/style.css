@@ -173,3 +173,6 @@ html, body { position: fixed; inset: 0; overscroll-behavior: none; }
   body.typing #write .quiet-text { display: none; }
 }
 #mic.voiced { border-color: #ffd27a; color: #ffd27a; }
+
+.panel .back { position: absolute; top: 10px; left: 10px; margin: 0; padding: 4px 10px; font-size: 13px; }
+#mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

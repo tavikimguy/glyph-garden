@@ -64,28 +64,53 @@ export function messageMood(text) {
 }
 
 // Secret words → hidden twists. Players are never told the list.
+// Each is a recipe of ingredients. Ingredients STACK: the first secret to name a
+// lead / pad / kit / bass gets it, and a later secret with a different one is
+// layered on top (a second lead, a second drum kit's snare + hats…). Numbers add up.
 const SECRETS = {
-  rain: (d) => { d.rain *= 3; d.delayTime = '8n.'; },
-  storm: (d) => { d.rain *= 3; d.kit = 'glitch'; },
-  night: (d) => { d.darker += 1; d.pad = 'choir'; },
-  moon: (d) => { d.darker += 1; d.lead = 'glass'; },
-  stars: (d) => { d.lead = 'bells'; d.arp = 'wide'; },
-  love: (d) => { d.brighter += 1; d.lead = 'bells'; },
-  heart: (d) => { d.brighter += 1; d.pad = 'warm'; },
-  dance: (d) => { d.kit = 'pulse'; d.bpmShift += 12; },
-  party: (d) => { d.kit = 'pulse'; d.bpmShift += 14; },
-  sleep: (d) => { d.kit = 'tick'; d.bpmShift -= 16; d.arpRate = 2; },
-  dream: (d) => { d.darker -= 1; d.pad = 'choir'; d.delayFeedback = 0.5; },
-  fire: (d) => { d.kit = 'glitch'; d.bass = 'buzz'; },
-  ocean: (d) => { d.delayTime = '4n'; d.delayFeedback = 0.5; },
-  sea: (d) => { d.delayTime = '4n'; d.delayFeedback = 0.45; },
-  sun: (d) => { d.brighter += 1; d.lead = 'kalimba'; },
-  summer: (d) => { d.brighter += 1; d.lead = 'kalimba'; },
-  game: (d) => { d.lead = 'chip'; d.bass = 'pluck'; },
-  play: (d) => { d.lead = 'chip'; },
-  ghost: (d) => { d.darker += 1; d.lead = 'glass'; d.delayFeedback = 0.55; },
-  home: (d) => { d.pad = 'organ'; d.kit = 'soft'; },
+  rain: { rain: 2, delayTime: '8n.' },
+  storm: { rain: 2, kit: 'glitch' },
+  night: { darker: 1, pad: 'choir' },
+  moon: { darker: 1, lead: 'glass' },
+  stars: { lead: 'bells', arp: 'wide' },
+  love: { brighter: 1, lead: 'bells' },
+  heart: { brighter: 1, pad: 'warm' },
+  dance: { kit: 'pulse', bpm: 12 },
+  party: { kit: 'pulse', bpm: 14 },
+  sleep: { kit: 'tick', bpm: -16, arpRate: 2 },
+  dream: { darker: -1, pad: 'choir', echo: 0.15 },
+  fire: { kit: 'glitch', bass: 'buzz' },
+  ocean: { delayTime: '4n', echo: 0.2 },
+  sea: { delayTime: '4n', echo: 0.15 },
+  sun: { brighter: 1, lead: 'kalimba' },
+  summer: { brighter: 1, lead: 'kalimba' },
+  game: { lead: 'chip', bass: 'pluck' },
+  play: { lead: 'chip' },
+  ghost: { darker: 1, lead: 'glass', echo: 0.2 },
+  home: { pad: 'organ', kit: 'soft' },
+  frog: { lead: 'kalimba', bass: 'pluck', swing: 0.2, bpm: 6 }, // a little hoppy and bouncy
+  cloud: { pad: 'choir', echo: 0.2, bpm: -8, brighter: 1 }, // soft and floaty
 };
+const CATEGORIES = ['lead', 'pad', 'kit', 'bass', 'arp', 'delayTime'];
+
+function applySecret(d, recipe, claimed) {
+  for (const key of CATEGORIES) {
+    if (!recipe[key]) continue;
+    if (!claimed.has(key)) {
+      d[key] = recipe[key];
+      claimed.add(key);
+    } else if (d[key] !== recipe[key]) {
+      d.layers[key] ??= recipe[key]; // already taken → play it as an extra layer
+    }
+  }
+  d.darker += recipe.darker || 0;
+  d.brighter += recipe.brighter || 0;
+  d.bpmShift += recipe.bpm || 0;
+  d.rain *= 1 + (recipe.rain || 0);
+  d.delayFeedback = Math.min(0.65, d.delayFeedback + (recipe.echo || 0));
+  if (recipe.swing) d.swing = Math.max(d.swing, recipe.swing);
+  if (recipe.arpRate) d.arpRate = recipe.arpRate;
+}
 
 // Seeded random: same text → same "random" choices.
 function rng(seed) {
@@ -135,12 +160,14 @@ export function songDNA(messages) {
     darker: 0,
     bpmShift: 0,
     secrets: [],
+    layers: {}, // extra sounds from secrets that stacked on top (e.g. a second lead)
   };
 
-  // Secret words, applied once each.
+  // Secret words, in the order they were said, each once — and they stack.
+  const claimed = new Set();
   for (const w of new Set(words)) {
     if (SECRETS[w]) {
-      SECRETS[w](d);
+      applySecret(d, SECRETS[w], claimed);
       d.secrets.push(w);
     }
   }

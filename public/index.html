@@ -35,6 +35,7 @@
   </section>
 
   <section id="lobby" class="panel" hidden>
+    <button id="lobby-back" class="quiet back">← back</button>
     <p class="mode">duet</p>
     <div id="lobby-code"></div>
     <div class="row">
@@ -51,6 +52,7 @@
   </section>
 
   <section id="local-setup" class="panel" hidden>
+    <button id="local-back" class="quiet back">← back</button>
     <p class="mode">duet · one screen</p>
     <div class="pickers">
       <div class="picker">
@@ -88,7 +90,7 @@
     <p class="prompt" hidden></p>
     <h2 id="write-who"></h2>
     <form id="write-form" class="compose">
-      <button id="mic" type="button" class="round" aria-label="speak your message" hidden>●</button>
+      <button id="mic" type="button" class="round" aria-label="hold to speak your message" hidden>●</button>
       <input id="message" maxlength="60" autocomplete="off" spellcheck="false" enterkeyhint="send" placeholder="write a message…">
       <button id="send" type="submit" class="round" aria-label="send">↑</button>
     </form>

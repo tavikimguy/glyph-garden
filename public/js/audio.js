@@ -174,6 +174,9 @@ export async function initAudio() {
   voiceIn.connect(shifter);
   // Recordings are much hotter than the robot voices; this keeps them from burying the drums.
   const recordedIn = new Tone.Gain(0.4).connect(voiceIn);
+  // Your own spoken words in the song: no grit, chorus or octave ghost — just a little room.
+  const cleanVoice = new Tone.Gain(0.55).connect(limiter);
+  cleanVoice.connect(new Tone.Gain(0.25).connect(reverb));
 
   // Each robot voice gets its own vibrato (the little wobble that sounds sung).
   const robotIn = {};
@@ -183,7 +186,7 @@ export async function initAudio() {
       : new Tone.Gain(1).connect(voiceIn);
   }
 
-  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, robotIn, muffle, crusher, harmony };
+  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, cleanVoice, robotIn, muffle, crusher, harmony };
   newChimes();
   setKey(DEFAULT_KEY);
   startAmbience();
@@ -447,6 +450,31 @@ function playInstrument(voice, time, freq, dur) {
   e.last = t + dur;
 }
 
+// The nearest note of the song's key (all 7 notes, so the nudge is as small as possible).
+function nearestInKey(freq, k) {
+  const midi = 69 + 12 * Math.log2(freq / 440);
+  const { steps } = MODES[k.mode];
+  let best = midi;
+  let bestDistance = Infinity;
+  for (let oct = -1; oct <= 9; oct++) {
+    for (const step of steps) {
+      const note = 12 * oct + k.root + step;
+      if (Math.abs(note - midi) < bestDistance) { bestDistance = Math.abs(note - midi); best = note; }
+    }
+  }
+  return 440 * 2 ** ((best - 69) / 12);
+}
+
+// A spoken message in the song: syllable n played as you said it, just tuned to the
+// nearest note (at most ~2 semitones) and sent down a clean path — so it's your voice.
+function singNatural(sung, n, time, k) {
+  const seg = sung.segments[n];
+  const rate = seg.pitch ? Math.min(1.12, Math.max(0.89, nearestInKey(seg.pitch, k) / seg.pitch)) : 1;
+  const src = new Tone.ToneBufferSource({ url: sung.buffer, playbackRate: rate, fadeIn: 0.01, fadeOut: 0.03 }).connect(fx.cleanVoice);
+  src.onended = () => src.dispose();
+  src.start(time, seg.start, (seg.end - seg.start) + 0.04);
+}
+
 // A spoken message, sung: syllable n of the recording, stretched to fit the note's
 // length and tuned to the melody note — your real words, in your own (autotuned) voice.
 // sung = { buffer, segments: [{ start, end, pitch }] } from voicebank.prepareSung.
@@ -578,24 +606,16 @@ function buildBand(dna) {
   const kick = keep(new Tone.MembraneSynth({
     pitchDecay, octaves, envelope: { attack: 0.001, decay, sustain: 0, release: 0.01 }, volume: kickVol,
   }).connect(drums));
-  let snare;
-  if (kit.snare[0] === 'metal') {
-    snare = keep(new Tone.MetalSynth({
-      envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
-      harmonicity: 5.1, modulationIndex: 16, resonance: 3000, octaves: 1.5, volume: -14,
-    }).connect(drums));
-  } else {
-    const [type, snareDecay, freq, vol] = kit.snare;
-    const body = keep(new Tone.Filter(freq, 'bandpass').connect(drums));
-    body.connect(fx.reverb);
-    snare = keep(new Tone.NoiseSynth({
-      noise: { type }, envelope: { attack: 0.001, decay: snareDecay, sustain: 0, release: 0.01 }, volume: vol,
-    }).connect(body));
+  const main = makeSnareAndHat(kit, drums, keep);
+  // A second kit from a stacked secret word adds its own snare + hats on top.
+  const extra = dna.layers?.kit ? makeSnareAndHat(KITS[dna.layers.kit], drums, keep, -4) : null;
+  // A second lead from a stacked secret word plays a counter-arpeggio, an octave up.
+  let lead2 = null;
+  if (dna.layers?.lead) {
+    const [Voice2, options2] = LEADS[dna.layers.lead];
+    lead2 = keep(new Tone.PolySynth(Voice2, { ...options2, volume: options2.volume - 5 }).connect(echo));
   }
-  const [hatDecay, hatFreq, hatVol] = kit.hat;
-  const hat = keep(new Tone.NoiseSynth({
-    noise: { type: 'white' }, envelope: { attack: 0.001, decay: hatDecay, sustain: 0, release: 0.01 }, volume: hatVol,
-  }).connect(keep(new Tone.Filter(hatFreq, 'highpass').connect(drums))));
+  const pad2 = dna.layers?.pad ? keep(new Tone.PolySynth(Tone.Synth, { ...PADS[dna.layers.pad], volume: PADS[dna.layers.pad].volume - 4 }).connect(duck)) : null;
   const crashFilter = keep(new Tone.Filter(5000, 'highpass').connect(drums));
   crashFilter.connect(fx.reverb);
   const crash = keep(new Tone.NoiseSynth({
@@ -603,16 +623,42 @@ function buildBand(dna) {
   }).connect(crashFilter));
 
   return {
-    lead, pad, bass, hat, crash,
+    lead, lead2, pad, pad2, bass, hat: main.hat, extra, crash,
     kick: (t, beatLen) => {
       kick.triggerAttackRelease('C1', beatLen / 2, t);
       duck.gain.setValueAtTime(0.35, t);
       duck.gain.linearRampToValueAtTime(1, t + beatLen * 0.45);
     },
+    hitSnare: main.hitSnare,
+    dispose: () => nodes.forEach((n) => n.dispose()),
+  };
+}
+
+// A kit's snare (noise or a metallic click) and hi-hat. quieter = dB to drop it by.
+function makeSnareAndHat(kit, drums, keep, quieter = 0) {
+  let snare;
+  if (kit.snare[0] === 'metal') {
+    snare = keep(new Tone.MetalSynth({
+      envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
+      harmonicity: 5.1, modulationIndex: 16, resonance: 3000, octaves: 1.5, volume: -14 + quieter,
+    }).connect(drums));
+  } else {
+    const [type, snareDecay, freq, vol] = kit.snare;
+    const body = keep(new Tone.Filter(freq, 'bandpass').connect(drums));
+    body.connect(fx.reverb);
+    snare = keep(new Tone.NoiseSynth({
+      noise: { type }, envelope: { attack: 0.001, decay: snareDecay, sustain: 0, release: 0.01 }, volume: vol + quieter,
+    }).connect(body));
+  }
+  const [hatDecay, hatFreq, hatVol] = kit.hat;
+  const hat = keep(new Tone.NoiseSynth({
+    noise: { type: 'white' }, envelope: { attack: 0.001, decay: hatDecay, sustain: 0, release: 0.01 }, volume: hatVol + quieter,
+  }).connect(keep(new Tone.Filter(hatFreq, 'highpass').connect(drums))));
+  return {
+    hat,
     hitSnare: (t, velocity = 1) => (kit.snare[0] === 'metal'
       ? snare.triggerAttackRelease(250, 0.05, t, 0.8 * velocity)
       : snare.triggerAttackRelease(0.1, t, velocity)),
-    dispose: () => nodes.forEach((n) => n.dispose()),
   };
 }
 
@@ -624,6 +670,7 @@ function playSection(dna, { start, end, chord, level, crash }) {
   const totalSteps = Math.round(length / six);
   band.pad.triggerAttackRelease(chord, length + 0.3, start, 0.5);
   if (level >= 3) band.pad.triggerAttackRelease(chord.map((n) => up(n, 12)), length, start, 0.3);
+  band.pad2?.triggerAttackRelease(chord.map((n) => up(n, 12)), length + 0.3, start, 0.4);
   if (crash && level >= 3) band.crash.triggerAttackRelease(0.05, start, 0.8);
   const tones = [...chord.map((n) => up(n, 12)), up(chord[0], 24)];
   const shape = ARPS[dna.arp];
@@ -636,6 +683,8 @@ function playSection(dna, { start, end, chord, level, crash }) {
     const t = start + k * six + (k % 2 ? dna.swing * six : 0); // swing pushes the off-steps late
     const fill = level >= 3 && totalSteps >= 8 && k >= totalSteps - 4; // snare roll into the next part
     if (k % rate === 0) band.lead.triggerAttackRelease(tones[shape[(k / rate) % shape.length]], '16n', t, step % 4 === 0 ? 0.45 : 0.25);
+    // the stacked second lead answers on the in-between steps, an octave up, going the other way
+    if (band.lead2 && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
     if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
     if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
     if (level >= 2 && beat.hat.includes(step)) band.hat.triggerAttackRelease(0.02, t, 0.7);
@@ -645,6 +694,9 @@ function playSection(dna, { start, end, chord, level, crash }) {
     }
     if (fill) band.hitSnare(t, 0.5 + (k - (totalSteps - 4)) * 0.17);
     else if (level >= 3 && beat.snare.includes(step)) band.hitSnare(t);
+    // the stacked second kit: its hats on the off-steps, its snare doubling the backbeat
+    if (band.extra && level >= 2 && step % 4 === 3) band.extra.hat.triggerAttackRelease(0.02, t, 0.5);
+    if (band.extra && level >= 3 && beat.snare.includes(step) && !fill) band.extra.hitSnare(t + 0.005, 0.7);
   }
 }
 
@@ -675,17 +727,28 @@ function schedulePass(song, passStart, pass) {
     const msgStart = t;
     at(t, () => song === currentSong && callbacks.onMessage(m, pass));
 
-    syls.forEach(({ s, wi, si }, n) => {
-      const len = (n === syls.length - 1 ? 4 : steps) * six;
-      const when = t;
-      const freq = scale[notes[n]];
-      soon(when, () => {
-        if (msg.sung) singRecorded(msg.sung, n, when, freq, len * 0.95);
-        else sing(voice, s, when, freq, len * 0.95);
+    if (msg.sung) {
+      // A spoken message keeps the speaker's own timing (a long "heyyyy" stays long);
+      // each syllable is just nudged onto the nearest note of the key.
+      const { segments } = msg.sung;
+      const zero = segments[0].start;
+      syls.forEach(({ wi, si }, n) => {
+        const seg = segments[Math.min(n, segments.length - 1)];
+        const when = msgStart + (seg.start - zero);
+        if (n < segments.length) soon(when, () => singNatural(msg.sung, n, when, dna));
+        at(when, () => song === currentSong && callbacks.onSyllable(m, wi, si));
       });
-      at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
-      t += len;
-    });
+      t = msgStart + (segments[segments.length - 1].end - zero) + six;
+    } else {
+      syls.forEach(({ s, wi, si }, n) => {
+        const len = (n === syls.length - 1 ? 4 : steps) * six;
+        const when = t;
+        const freq = scale[notes[n]];
+        soon(when, () => sing(voice, s, when, freq, len * 0.95));
+        at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
+        t += len;
+      });
+    }
     const section = {
       start: msgStart, end: onBeat(t), chord: chordFor(dna, dna.progression[m % dna.progression.length]),
       level: levelFor(m), crash: m === 0 || m === last - 1,

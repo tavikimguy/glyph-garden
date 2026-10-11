@@ -247,7 +247,7 @@ function glyphsWithLetter(letter) {
 function showKey(fresh) {
   $('key').hidden = state.revealed.size === 0;
   $('key').innerHTML = [...state.revealed]
-    .map((l) => `<span class="${l === fresh ? 'new' : ''}">${escapeHtml(state.cipher[l])}<b>${l}</b></span>`)
+    .map((l) => `<span class="${l === fresh ? 'new' : ''}">${escapeHtml(state.cipher[l])}${TEXT_STYLE}<b>${l}</b></span>`)
     .join('');
 }
 
@@ -538,6 +538,8 @@ function stageOf(g) {
 // (see formations.js and pictures.js). Which one plays in each slot comes from
 // the duet's seed and the words said — never from this phone's own randomness —
 // so both screens (even one that joined late) dance the same dance.
+// Patterns use even slots for "first" dances and odd slots for "second" ones, so a
+// second dance is never a repeat of the first (e.g. when no picture word was said).
 function danceFor(kind, slot) {
   if (kind === 'picture') {
     const earned = earnedPictures();
@@ -545,7 +547,7 @@ function danceFor(kind, slot) {
   }
   const rand = seededRandom(state.seed ^ 0xda);
   const order = PATTERN_NAMES.map((name) => [rand(), name]).sort((a, b) => a[0] - b[0]).map(([, name]) => name);
-  return order[slot % order.length];
+  return order[(slot * 2 + (kind === 'picture' ? 1 : 0)) % order.length];
 }
 
 // Pictures someone has "earned" by saying their word (cat, moon, love…), in the order first said.
@@ -750,6 +752,7 @@ function drawRipples(p, now) {
 
 // What a glyph shows right now: its symbol, a scramble, or the real letter.
 const SCRAMBLE_MS = 180;
+const TEXT_STYLE = '\uFE0E'; // asks phones to draw a symbol as plain text, never as an emoji
 const SMALL_SCREEN = Math.min(window.innerWidth, window.innerHeight) < 600;
 function face(g, now) {
   const from = g.decodeAt ?? g.revealAt; // decoded in the song, or its letter was revealed
@@ -837,7 +840,7 @@ function sketch(p) {
       p.push();
       p.translate(g.x, g.y + hop);
       if (spin) p.rotate(spin);
-      p.text(face(g, now), 0, 0);
+      p.text(face(g, now) + TEXT_STYLE, 0, 0);
       p.pop();
       g.flash *= 0.93;
     }
@@ -868,7 +871,7 @@ function drawLyric(p, now) {
     ctx.shadowColor = `rgba(${r}, ${gg}, ${b}, 0.6)`;
     const decoded = g.decodeAt !== null && now >= g.decodeAt + SCRAMBLE_MS;
     p.fill(decoded ? 250 : r, decoded ? 250 : gg, decoded ? 252 : b, 255);
-    p.text(face(g, now), x, y);
+    p.text(face(g, now) + TEXT_STYLE, x, y);
   }
   ctx.shadowBlur = 0;
 }
@@ -1124,6 +1127,15 @@ async function enterGarden() {
 }
 
 $('host').addEventListener('click', () => openLobby(newCode()));
+// ← back from the duet lobby: leave the room and go home.
+$('lobby-back').addEventListener('click', () => {
+  state.online?.conn.close();
+  state.online = null;
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  $('share').textContent = 'share link';
+  show('title');
+});
+$('local-back').addEventListener('click', () => show('title'));
 $('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const code = $('join-code').value.trim().toUpperCase();
@@ -1162,9 +1174,9 @@ $('my-colors').addEventListener('click', (e) => {
 });
 
 // ───────────────────────── speak (and sing) your message ─────────────────────────
-// Tap ● and talk: your voice is recorded (so the song can sing your actual words,
-// autotuned) and, where the browser can, turned into text in the box to fix up.
-// Tap ● again (or send) to finish. Max 8 seconds.
+// Press and hold ● while you talk; let go when you're done. Your voice is recorded
+// (so the song can sing your actual words, autotuned) and, where the browser can,
+// turned into text in the box to fix up. Max 8 seconds.
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 let listening = null; // { rec, recorder, timer } while the mic is on
@@ -1172,7 +1184,7 @@ let listening = null; // { rec, recorder, timer } while the mic is on
 async function startSpeaking() {
   $('mic').classList.add('on');
   $('write-hint').classList.add('show');
-  $('write-hint').textContent = 'listening… tap ● when you’re done';
+  $('write-hint').textContent = 'listening… let go when you’re done';
   listening = { rec: null, recorder: null, timer: setTimeout(stopSpeaking, 8000) };
   const session = listening;
   if (canRecord) {
@@ -1206,15 +1218,22 @@ async function stopSpeaking() {
     const audio = await recorder.stop();
     state.spoken = { audio, blob: audio.blob };
     $('mic').classList.add('voiced');
-    $('write-hint').textContent = '♪ your voice will sing this — tap ● to redo';
+    $('write-hint').textContent = '♪ your voice will sing this — hold ● again to redo';
   } catch {
     $('write-hint').textContent = 'couldn’t record that — try again, or just type';
   }
 }
 
 if (Recognition || canRecord) {
-  $('mic').hidden = false;
-  $('mic').addEventListener('click', () => (listening ? stopSpeaking() : startSpeaking()));
+  const mic = $('mic');
+  mic.hidden = false;
+  mic.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // keep the keyboard from popping up / the button from being "selected"
+    mic.setPointerCapture?.(e.pointerId); // still counts as holding if your thumb slides a little
+    if (!listening) startSpeaking();
+  });
+  for (const end of ['pointerup', 'pointercancel']) mic.addEventListener(end, () => stopSpeaking());
+  mic.addEventListener('contextmenu', (e) => e.preventDefault()); // long-press menus on phones
 }
 
 // ───────────────────────── phone keyboard ─────────────────────────
