@@ -20,12 +20,21 @@ const MAX_CHARS = 60; // per message (the room enforces the same limit)
 // Game modes: how many messages each person writes, and how many messages
 // make one "round" (an interlude plays after every round).
 const GAME_MODES = {
-  duet: { perPlayer: 4, label: 'duet' },
-  party: { perPlayer: 2, label: 'party' },
-  diary: { perPlayer: 6, label: 'diary', round: 2 },
+  duet: { perPlayer: 4 }, // take turns, 4 each
+  diary: { perPlayer: 6, round: 2 }, // just you, 6 lines, a dance every 2
+  party: { round: 4, rounds: 3, perRound: 2, free: true }, // no turns: a dance every 4 messages, 12 in all, max 2 each per round
 };
-const totalMessages = () => state.order.length * GAME_MODES[state.mode].perPlayer;
+const isParty = () => !!GAME_MODES[state.mode].free;
+const totalMessages = () => {
+  const mode = GAME_MODES[state.mode];
+  return mode.free ? mode.round * mode.rounds : state.order.length * mode.perPlayer;
+};
 const roundSize = () => GAME_MODES[state.mode].round || state.order.length;
+// Party: how many messages you've sent in the current round (the cap is 2).
+function mineThisRound() {
+  const start = Math.floor(state.messages.length / roundSize()) * roundSize();
+  return state.messages.slice(start).filter((m) => m.player === state.online?.me).length + state.inbox.filter((m) => m.player === state.online?.me).length;
+}
 // A small palette players pick from; COLORS holds each player's current pick.
 const PALETTE = {
   sky: [150, 220, 255], peach: [255, 190, 150], mint: [150, 240, 200],
@@ -139,6 +148,7 @@ function endBank(skipped) {
 // ───────────────────────── writing turns ─────────────────────────
 
 function currentPlayer() {
+  if (isParty()) return state.online.me; // no turns: you can always write
   return state.order[state.messages.length % state.order.length];
 }
 
@@ -156,6 +166,15 @@ function startWriting() {
   if (state.inbox.length) return receiveNext();
   showRoundPrompt(true);
   const player = currentPlayer();
+  if (isParty() && mineThisRound() >= GAME_MODES.party.perRound) {
+    // You've said your two this round — wait for the others to fill it.
+    state.phase = 'round-full';
+    show('waiting');
+    $('waiting-who').textContent = 'you’ve said yours this round';
+    $('waiting-who').style.color = rgb(COLORS[player]);
+    $('waiting-note').textContent = 'waiting for the others…';
+    return;
+  }
   if (state.online && player !== state.online.me) {
     state.phase = 'their-turn';
     show('waiting');
@@ -164,16 +183,21 @@ function startWriting() {
     $('waiting-note').textContent = `message ${state.messages.length + 1} / ${totalMessages()}`;
     return;
   }
+  const wasWriting = state.phase === 'write';
   state.phase = 'write';
   show('write');
-  $('write-who').textContent = state.online ? 'your turn'
-    : state.mode === 'diary' ? 'dear diary…' : `${NAMES[player]}, say something`;
+  $('write-who').textContent = isParty() ? 'say anything — into the void'
+    : state.online ? 'your turn'
+      : state.mode === 'diary' ? 'dear diary…' : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
-  $('message').value = '';
-  state.spoken = null;
-  $('mic').classList.remove('voiced');
-  $('write-hint').classList.remove('show');
-  $('write-hint').textContent = 'enter to send';
+  if (!wasWriting) {
+    // a fresh message (in a party, a half-typed one survives other people's words)
+    $('message').value = '';
+    state.spoken = null;
+    $('mic').classList.remove('voiced');
+    $('write-hint').classList.remove('show');
+    $('write-hint').textContent = 'enter to send';
+  }
   updateCount();
   $('message').style.caretColor = rgb(COLORS[player]);
   if (!matchMedia('(pointer: coarse)').matches) $('message').focus(); // don't pop the phone keyboard uninvited
@@ -190,10 +214,19 @@ async function send() {
   $('write-hint').textContent = 'enter to send';
   if (state.online) {
     // Send it to the room; it comes back to both phones as 'said', in order.
-    state.phase = 'sending';
-    show(null);
     const voice = state.spoken ? await encodeVoice(state.spoken.blob) : undefined;
     state.online.conn.send({ type: 'say', text, voice });
+    if (isParty()) {
+      // No turns: clear the box and keep going; your words come back from the room.
+      $('message').value = '';
+      state.spoken = null;
+      $('mic').classList.remove('voiced');
+      $('write-hint').classList.remove('show');
+      updateCount();
+      return;
+    }
+    state.phase = 'sending';
+    show(null);
     return;
   }
   receive(currentPlayer(), text, false, state.spoken);
@@ -225,6 +258,12 @@ function receive(player, text, quiet = false, voice = null) {
   const landing = spawnMessage(msg, state.messages.length - 1);
   revealLetter(text, quiet ? 0 : landing + 400);
   if (quiet) return;
+  const n = state.messages.length;
+  if (isParty() && n % roundSize() !== 0 && n < totalMessages()) {
+    // Mid-round: words just drift in; keep writing (or keep waiting) as you were.
+    if (state.phase === 'write' || state.phase === 'round-full') startWriting();
+    return;
+  }
   state.phase = 'wait';
   show(null);
   setTimeout(afterSend, landing + 900);
@@ -312,7 +351,10 @@ function afterSend() {
       w.syllables.forEach((syl) => items.push({ syl, player: message.player, glyphs, message, n: k++ }));
     });
   }
-  const seconds = playInterlude(items, state.banks, (round / rounds) * 0.7, (item) => {
+  // A party round has 4 people's words: play a spread-out sample of ~16 syllables
+  // (a bit of everyone) so the interlude stays around 4–5 seconds.
+  const heard = isParty() && items.length > 16 ? items.filter((_, i) => i % Math.ceil(items.length / 16) === 0) : items;
+  const seconds = playInterlude(heard, state.banks, (round / rounds) * 0.7, (item) => {
     item.glyphs.forEach((g) => { g.flash = 1; });
   });
   // Two dances, max (see interludeDances for the rules).
@@ -649,7 +691,7 @@ function startFormation(name, slot, golden = false) {
   const msgSize = [];
   state.glyphs.forEach((g, i) => {
     g.fi = i;
-    g.side = state.order.indexOf(g.player) % 2; // two groups, alternating in turn order
+    g.side = (isParty() ? g.player : state.order.indexOf(g.player)) % 2; // two groups, alternating
     g.fj = counts[g.side]++;
     g.fm = msgSize[g.msg] || 0;
     msgSize[g.msg] = g.fm + 1;
@@ -1021,7 +1063,9 @@ let lastTyping = 0;
 // "message 3/8 · 12/60" under the box; turns gold near the limit.
 function updateCount() {
   const used = cleanText($('message').value).length;
-  $('write-count').textContent = `message ${state.messages.length + 1}/${totalMessages()} · ${used}/${MAX_CHARS}`;
+  $('write-count').textContent = isParty()
+    ? `round ${Math.min(GAME_MODES.party.rounds, Math.floor(state.messages.length / roundSize()) + 1)}/${GAME_MODES.party.rounds} · you ${mineThisRound()}/${GAME_MODES.party.perRound} · ${used}/${MAX_CHARS}`
+    : `message ${state.messages.length + 1}/${totalMessages()} · ${used}/${MAX_CHARS}`;
   $('write-count').classList.toggle('near', used >= MAX_CHARS - 10);
 }
 
@@ -1078,9 +1122,14 @@ function onConnection(status) {
 }
 
 // Copy the room's latest picks onto this phone: voices, colours, who's here.
+// Who's playing: a duet's fixed turn order, or (party) everyone with a seat.
+function partyOrDuetOrder(room) {
+  return room.order || room.players.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
+}
+
 function applyRoom(room) {
   state.online.room = room;
-  if (room.order) state.order = room.order;
+  state.order = partyOrDuetOrder(room);
   state.prompts = !!room.prompts;
   if (state.phase === 'write' || state.phase === 'their-turn') showRoundPrompt(true);
   room.players.forEach((p, i) => {
@@ -1113,14 +1162,13 @@ function partnerNote(room, inGarden) {
 // Party: who's missing from the garden (or, in the lobby, who's here).
 function partyNote(room, inGarden) {
   const me = state.online.me;
-  if (!room.order) {
+  if (!room.started) {
     const here = room.players.filter((p) => p?.online).length;
     if (me !== 0) return `${here} here — waiting for the host to start`;
     return here < 2 ? 'send the link or code — you need at least 2 people' : `${here} here — start when everyone’s in`;
   }
-  const gone = room.order.filter((i) => i !== me && !room.players[i]?.online);
-  const outside = room.order.filter((i) => i !== me && room.players[i]?.online && !room.players[i].entered);
-  if (gone.length) return `${NAMES[gone[0]].toLowerCase()} left — they can come back with the same link`;
+  const seats = room.players.map((p, i) => (p ? i : -1)).filter((i) => i >= 0 && i !== me);
+  const outside = seats.filter((i) => room.players[i].online && !room.players[i].entered);
   if (outside.length) return inGarden ? `waiting for ${outside.map((i) => NAMES[i].toLowerCase()).join(', ')} to enter` : 'the party has started ✶';
   return inGarden ? '' : 'the party has started ✶';
 }
@@ -1136,11 +1184,11 @@ function renderLobby() {
   // Party: the guest list, and the host's start button.
   $('party-list').hidden = !party;
   if (party) {
-    $('party-list').innerHTML = room.players.map((p, i) => (p && (p.online || room.order?.includes(i))
+    $('party-list').innerHTML = room.players.map((p, i) => (p && p.online
       ? `<li style="color:${rgb(COLORS[i])}">${NAMES[i].toLowerCase()}${i === me ? ' (you)' : ''}${i === 0 ? ' · host' : ''} — ${escapeHtml(p.voice)}</li>`
       : '')).join('');
   }
-  const started = !party || !!room.order;
+  const started = !party || room.started;
   $('start-party').hidden = !party || me !== 0 || started;
   $('start-party').disabled = room.players.filter((p) => p?.online).length < 2;
   $('enter').hidden = !started;
@@ -1184,7 +1232,8 @@ function onRoom(msg) {
     }
     if (state.messages.length + state.inbox.length > msg.index) return; // already have it
     state.inbox.push(msg);
-    if (state.phase === 'their-turn' || state.phase === 'sending') receiveNext();
+    const ready = ['their-turn', 'sending'].concat(isParty() ? ['write', 'round-full'] : []);
+    if (ready.includes(state.phase)) receiveNext();
   } else if (msg.type === 'voice') {
     const voice = { data: msg.data, mime: msg.mime };
     if (state.messages[msg.index]) attachVoice(state.messages[msg.index], voice);
@@ -1214,7 +1263,7 @@ async function enterGarden() {
   await startAudio();
   state.started = true;
   state.mode = state.online.room.mode;
-  state.order = state.online.room.order;
+  state.order = partyOrDuetOrder(state.online.room);
   state.online.conn.send({ type: 'entered' });
   state.seed = state.online.room.seed;
   state.cipher = makeCipher(state.seed);
@@ -1238,7 +1287,7 @@ $('start-party').addEventListener('click', async () => {
 // ── title screen: pick a game mode ──
 const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
-  party: 'Up to 8 people in one garden. Everyone adds two lines, in turn; the song braids all your voices together.',
+  party: 'Up to 8 people, no turns: throw words into the void whenever you like. Every 4 messages the garden dances; after 12, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
 };
 function pickMode(mode) {
