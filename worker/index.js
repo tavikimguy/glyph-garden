@@ -8,12 +8,15 @@ import { WordLog, wordsWorthCounting } from './words.js';
 export { WordLog };
 
 // Game modes. A duet is 2 people taking turns, 4 messages each.
-// A party is up to 8 people with no turns: anyone sends whenever they like,
-// in rounds of 4 messages (max 2 per person per round), 3 rounds in all.
+// A party is up to 8 people with no turns: anyone sends whenever they like (max 2
+// per round). A round ends — and everyone dances — once every person in the room has
+// at least one line in it, or 30 s after it began if someone's gone quiet.
+// 3 rounds for up to 4 people, 2 for bigger parties.
 const MODES = {
   duet: { seats: 2, perPlayer: 4 },
-  party: { seats: 8, round: 4, rounds: 3, perRound: 2 },
+  party: { seats: 8, perRound: 2, roundTimeout: 30_000 },
 };
+const partyRounds = (people) => (people <= 4 ? 3 : 2);
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
 const MAX_VOICE = 400_000; // a spoken message's recording, base64 (8 s of compressed audio is far less)
 const CODE = /^[A-Z0-9]{4,8}$/;
@@ -69,9 +72,34 @@ export class Room extends DurableObject {
     return this.room;
   }
 
+  // Duet: a fixed number of messages. Party: open-ended (the rounds decide).
   total() {
     const mode = MODES[this.room.mode];
-    return mode.round ? mode.round * mode.rounds : this.room.order.length * mode.perPlayer;
+    return mode.perPlayer ? this.room.order.length * mode.perPlayer : Infinity;
+  }
+
+  // Party round bookkeeping: roundEnds = message counts where rounds finished.
+  roundStart() {
+    return this.room.roundEnds?.at(-1) ?? 0;
+  }
+
+  partyOver() {
+    return (this.room.roundEnds?.length || 0) >= (this.room.rounds || 3);
+  }
+
+  async endRound(reason) {
+    const room = this.room;
+    if (room.messages.length <= this.roundStart()) return;
+    room.roundEnds = [...(room.roundEnds || []), room.messages.length];
+    await this.ctx.storage.deleteAlarm();
+    await this.save();
+    this.broadcast({ type: 'round', end: room.messages.length, rounds: room.rounds, final: this.partyOver(), reason });
+  }
+
+  // The 30-second safety net: a quiet person can't freeze the party.
+  async alarm() {
+    await this.load();
+    if (this.room.mode === 'party' && !this.partyOver()) await this.endRound('timeout');
   }
 
   async save() {
@@ -126,10 +154,10 @@ export class Room extends DurableObject {
       const text = String(msg.text || '').trim().replace(/\s+/g, ' ').slice(0, MAX_TEXT);
       if (!text || !room.started || room.messages.length >= this.total()) return;
       const mode = MODES[room.mode];
-      if (mode.round) {
-        // Party: no turns, but at most 2 messages per person in each round of 4.
-        const roundStart = Math.floor(room.messages.length / mode.round) * mode.round;
-        const mine = room.messages.slice(roundStart).filter((m) => m.player === slot).length;
+      if (room.mode === 'party') {
+        // Party: no turns, but at most 2 messages per person per round.
+        if (this.partyOver()) return;
+        const mine = room.messages.slice(this.roundStart()).filter((m) => m.player === slot).length;
         if (mine >= mode.perRound) return;
       } else if (room.order[room.messages.length % room.order.length] !== slot) {
         return; // duet: not your turn
@@ -144,6 +172,14 @@ export class Room extends DurableObject {
       await this.save();
       await this.env.WORDS.getByName('global').record(wordsWorthCounting(text));
       this.broadcast({ type: 'said', player: slot, text, index, voice });
+      if (room.mode === 'party') {
+        // First line of a round starts the safety-net timer; everyone having a line ends it.
+        const inRound = room.messages.slice(this.roundStart());
+        if (inRound.length === 1) await this.ctx.storage.setAlarm(Date.now() + mode.roundTimeout);
+        const here = this.ctx.getWebSockets().map((w) => w.deserializeAttachment()?.slot);
+        const everyone = [...new Set(here)].filter((i) => room.players[i]);
+        if (everyone.every((i) => inRound.some((m) => m.player === i))) await this.endRound('everyone');
+      }
     } else if (msg.type === 'settings') {
       const me = room.players[slot];
       if (!me) return;
@@ -160,6 +196,8 @@ export class Room extends DurableObject {
       const here = new Set(this.ctx.getWebSockets().map((w) => w.deserializeAttachment()?.slot));
       if (here.size < 2) return;
       room.started = true;
+      room.rounds = partyRounds(here.size);
+      room.roundEnds = [];
       await this.save();
       this.broadcast({ type: 'room', room: this.publicRoom() });
     } else if (msg.type === 'entered') {
@@ -171,6 +209,8 @@ export class Room extends DurableObject {
       this.broadcast({ type: 'typing', player: slot }, ws);
     } else if (msg.type === 'again') {
       room.messages = [];
+      room.roundEnds = [];
+      await this.ctx.storage.deleteAlarm();
       room.seed = Math.floor(Math.random() * 2 ** 31);
       await this.ctx.storage.delete([...(await this.ctx.storage.list({ prefix: 'voice:' })).keys()]);
       await this.save();
@@ -191,7 +231,9 @@ export class Room extends DurableObject {
       seed: this.room.seed,
       order: this.room.order,
       started: !!this.room.started,
-      total: this.total(),
+      total: Number.isFinite(this.total()) ? this.total() : null,
+      rounds: this.room.rounds || null,
+      roundEnds: this.room.roundEnds || [],
       prompts: !!this.room.prompts,
       messages: this.room.messages,
       players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered } : null)),
