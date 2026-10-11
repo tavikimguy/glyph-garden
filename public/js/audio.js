@@ -99,10 +99,15 @@ const INSTRUMENTS = {
 
 export const VOICE_GROUPS = { instruments: Object.keys(INSTRUMENTS), voices: Object.keys(ROBOTS) };
 
-// Any voice or instrument by name.
+// Any voice or instrument by name. One shared object per name: each voice builds its
+// sound engine (oscillators, noise, filters that run for good) the first time it plays,
+// so handing out fresh objects piled up engines until the audio choked.
+const voices = {};
 export function robotVoice(name) {
-  if (INSTRUMENTS[name]) return { instrument: name, basePitch: INSTRUMENTS[name].base };
-  return { robot: name, basePitch: ROBOTS[name].base };
+  voices[name] ??= INSTRUMENTS[name]
+    ? { instrument: name, basePitch: INSTRUMENTS[name].base }
+    : { robot: name, basePitch: (ROBOTS[name] || ROBOTS.velvet).base };
+  return voices[name];
 }
 
 let fx = null;
@@ -251,7 +256,12 @@ export function setClarity(c, seconds = 1) {
   glide(fx.harmony.gain, (1 - c) * 0.25); // octave-up ghost only while garbled
 }
 
+let lastPlink = 0;
 export function plink(seed, time = Tone.now(), velocity = 0.8) {
+  // Several messages landing at once would be hundreds of notes in a few seconds:
+  // keep it to a light shower (about 25 a second) so the sound never chokes.
+  if (Math.abs(time - lastPlink) < 0.04) return;
+  lastPlink = time;
   const note = keyRain[hash(String(seed)) % keyRain.length];
   fx.drop.triggerAttackRelease(note, 0.1, time, velocity);
   fx.bell.triggerAttackRelease(note, 0.05, time + 0.005, velocity * 0.6);
@@ -913,7 +923,8 @@ const jamIsDrum = (symbol) => JAM_SOUNDS[jamSoundIndex(symbol)].kind === 'drum';
 // Play a symbol's sound at time t.
 function jamHit(symbol, t, velocity = 0.9) {
   const sound = jamSound(symbol);
-  if (sound.kind !== 'chord' && t <= sound.last) t = sound.last + 0.02; // one-note synths: never the same instant
+  // Same symbol, same 16th (fast tapping, or two phones on one symbol): it's one note, not a pile-up.
+  if (t < sound.last + 0.03) return sound.last;
   sound.last = t;
   const n = sound.step++;
   const chord = jamChordAt(t);
