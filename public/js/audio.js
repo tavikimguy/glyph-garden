@@ -117,12 +117,17 @@ let lastBump = 0;
 
 // Run fn when the audio clock reaches `time` (keeps visuals in sync with sound).
 export function at(time, fn) {
-  const id = setTimeout(() => { timers.delete(id); fn(); }, Math.max(0, (time - Tone.now()) * 1000));
+  const id = setTimeout(() => {
+    timers.delete(id);
+    // A busy screen can fire timers late, bunching notes up; a synth that can only play one
+    // note at a time then refuses the repeat. Skip that note, never stop the music over it.
+    try { fn(); } catch (err) { console.debug('skipped a late note', err.message); }
+  }, Math.max(0, (time - Tone.now()) * 1000));
   timers.add(id);
 }
 
 // Set something up just before it's due, instead of all at once at the start.
-const LOOKAHEAD = 0.25;
+const LOOKAHEAD = 0.4; // schedule notes this far ahead: room for a slow frame without bunching
 function soon(time, fn) {
   at(time - LOOKAHEAD, fn);
 }
@@ -961,8 +966,8 @@ export function startJamBacking(dna) {
     const start = session.start + i * session.beat * 4;
     soon(start, () => {
       if (jam !== session) return;
+      bar(i + 1); // queue the next bar first, so a skipped note can't stop the beat
       playSection(dna, { start, end: start + session.beat * 4, chord: jamChordAt(start + 0.01), level: 3, feature: true, groove: true });
-      bar(i + 1);
     });
   };
   bar(0);
