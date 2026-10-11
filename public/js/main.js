@@ -163,7 +163,11 @@ function showRoundPrompt(on) {
 }
 
 function startWriting() {
-  if (state.inbox.length) return receiveNext();
+  // Let in anything that arrived meanwhile (e.g. during a dance). Stop if one of
+  // them finishes a round — that starts the next dance instead.
+  while (state.inbox.length) {
+    if (receiveNext() === 'wait') return;
+  }
   showRoundPrompt(true);
   const player = currentPlayer();
   if (isParty() && mineThisRound() >= GAME_MODES.party.perRound) {
@@ -260,13 +264,14 @@ function receive(player, text, quiet = false, voice = null) {
   if (quiet) return;
   const n = state.messages.length;
   if (isParty() && n % roundSize() !== 0 && n < totalMessages()) {
-    // Mid-round: words just drift in; keep writing (or keep waiting) as you were.
-    if (state.phase === 'write' || state.phase === 'round-full') startWriting();
-    return;
+    // Mid-round: words just drift in; you keep writing (or waiting) as you were.
+    if (state.phase === 'write') updateCount();
+    return 'drift';
   }
   state.phase = 'wait';
   show(null);
   setTimeout(afterSend, landing + 900);
+  return 'wait'; // a round (or the duet's turn) is done — the next step takes over
 }
 
 // Each message unlocks one letter of the cipher for both players: its most
@@ -302,9 +307,10 @@ function showKey(fresh) {
     .join('');
 }
 
+// Returns 'wait' if that message finished a round (so a dance/turn change is coming).
 function receiveNext() {
   const { player, text, voice } = state.inbox.shift();
-  receive(player, text, false, voice);
+  return receive(player, text, false, voice);
 }
 
 // ── a spoken message's recording ──
@@ -1233,7 +1239,7 @@ function onRoom(msg) {
     if (state.messages.length + state.inbox.length > msg.index) return; // already have it
     state.inbox.push(msg);
     const ready = ['their-turn', 'sending'].concat(isParty() ? ['write', 'round-full'] : []);
-    if (ready.includes(state.phase)) receiveNext();
+    if (ready.includes(state.phase)) receiveNext(); // (in a dance or mid-landing, it waits its turn)
   } else if (msg.type === 'voice') {
     const voice = { data: msg.data, mime: msg.mime };
     if (state.messages[msg.index]) attachVoice(state.messages[msg.index], voice);
