@@ -923,7 +923,10 @@ export function jamTapLocal(dna, seat, button) {
 // The song: everyone's taps, folded into 2-bar loops. People come in one at a time,
 // then everyone plays together; on later loops, a drums-only breakdown first.
 // taps = [[seat, button, ms], …]; seats = who played (in order). onNote(seat, button) for visuals.
-export function playJamSong(taps, seats, dna, onNote) {
+// lyrics[seat][button] = a translated word ({ word, syllables }) or null: in each bar one person
+// is featured, and whenever they play a glyph with a word, a voice sings that word.
+// onWord(seat, word) when a word starts.
+export function playJamSong(taps, seats, dna, onNote, lyrics = {}, onWord = () => {}) {
   setupJam(dna);
   band = buildBand(dna);
   const { beat, six } = jam;
@@ -940,8 +943,49 @@ export function playJamSong(taps, seats, dna, onNote) {
   currentSong = song;
   const barLen = beat * 4;
 
-  const playBar = (start, barIndex, level, playing, drumsOnly) => {
+  const singers = Object.keys(ROBOTS);
+  const singWords = (seat, start, barIndex) => {
+    const words = lyrics[seat];
+    if (!words?.some(Boolean)) return;
+    const voice = robotVoice(singers[seat % singers.length]);
+    const scale = scaleFor(voice.basePitch, dna);
+    const hits = [];
+    patterns[seat].forEach((steps, button) => {
+      if (!words[button]) return;
+      for (const step of steps) if ((step >> 4) === barIndex % 2) hits.push([step % 16, button]);
+    });
+    hits.sort((a, b) => a[0] - b[0]);
+    // One word at a time. A different word tapped while one is still being sung
+    // queues up and follows straight after it, so a long word can't drown the others.
+    let busyUntil = -1;
+    let last = -1;
+    let queued = null;
+    const startWord = (step, button) => {
+      const { word, syllables } = words[button];
+      const notes = melody(syllables.length, scale.length, hash(word) ^ dna.seed);
+      syllables.forEach((syl, n) => {
+        const when = start + (step + n) * six;
+        const len = (n === syllables.length - 1 ? 2 : 1) * six;
+        soon(when, () => sing(voice, syl, when, scale[notes[n]], len * 0.95));
+      });
+      at(start + step * six, () => currentSong === song && onWord(seat, word));
+      busyUntil = step + syllables.length + 1;
+      last = button;
+    };
+    for (const [step, button] of hits) {
+      if (queued !== null && busyUntil <= step) { startWord(busyUntil, queued); queued = null; }
+      if (step < busyUntil) {
+        if (queued === null && button !== last) queued = button;
+        continue;
+      }
+      startWord(step, button);
+    }
+    if (queued !== null && busyUntil < 16) startWord(busyUntil, queued);
+  };
+
+  const playBar = (start, barIndex, level, playing, drumsOnly, singer) => {
     playSection(dna, { start, end: start + barLen, chord: jamChordAt(start + 0.01), level, feature: true });
+    if (singer !== undefined) singWords(singer, start, barIndex);
     for (const seat of playing) {
       patterns[seat].forEach((steps, button) => {
         if (drumsOnly && button !== 0) return;
@@ -959,14 +1003,16 @@ export function playJamSong(taps, seats, dna, onNote) {
     const plan = [];
     if (n === 0) {
       plan.push([1, [], false], [1, [], false]); // intro: just the band
-      seats.forEach((_, i) => plan.push([2, seats.slice(0, i + 1), false], [2, seats.slice(0, i + 1), false])); // one by one
+      // one by one, and whoever just came in sings
+      seats.forEach((seat, i) => plan.push([2, seats.slice(0, i + 1), false, seat], [2, seats.slice(0, i + 1), false, seat]));
     } else {
       plan.push([1, seats, true], [1, seats, true]); // breakdown: drums only
     }
-    for (let i = 0; i < 4; i++) plan.push([i < 2 ? 3 : 4, seats, false]); // everyone, all in
-    plan.forEach(([level, playing, drumsOnly], i) => {
+    // everyone, all in; the singing passes around, a bar each
+    for (let i = 0; i < 4; i++) plan.push([i < 2 ? 3 : 4, seats, false, seats[(i + n) % seats.length]]);
+    plan.forEach(([level, playing, drumsOnly, singer], i) => {
       const start = passStart + i * barLen;
-      soon(start, () => { if (currentSong === song) playBar(start, i, level, playing, drumsOnly); });
+      soon(start, () => { if (currentSong === song) playBar(start, i, level, playing, drumsOnly, singer); });
     });
     const end = passStart + plan.length * barLen;
     soon(end, () => { if (currentSong === song) pass(end, n + 1); });

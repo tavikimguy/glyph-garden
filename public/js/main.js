@@ -1449,7 +1449,7 @@ function openJamScreen(code) {
 
 function renderJamScreen(room) {
   $('jam-players').innerHTML = room.players.map((p, i) => (p && p.online
-    ? `<li style="color:${rgb(COLORS[i])}">${NAMES[i].toLowerCase()} ${p.glyphs ? `<b>${p.glyphs.map(escapeHtml).join('')}</b>` : '<span class="quiet-text">picking glyphs…</span>'}</li>`
+    ? `<li style="color:${rgb(COLORS[i])}">${NAMES[i].toLowerCase()} ${p.glyphs ? `<b>${p.glyphs.map(escapeHtml).join('')}</b>${p.words?.some(Boolean) ? ` <span class="quiet-text">${p.words.filter(Boolean).map(escapeHtml).join(' · ')}</span>` : ''}` : '<span class="quiet-text">picking glyphs…</span>'}</li>`
     : '')).join('') || '<li class="quiet-text">waiting for phones to join…</li>';
   $('jam-start').disabled = !room.players.some((p) => p?.online && p.glyphs);
 }
@@ -1521,15 +1521,31 @@ function finishJam(taps) {
   state.dna = jamDNA(room);
   let dance = 0;
   startFormation(danceFor('pattern', dance), 'jam0');
+  const lyrics = {};
+  for (const seat of seats) {
+    lyrics[seat] = (room.players[seat].words || []).map((w) => (w ? { word: w, syllables: translate(w).flatMap((x) => x.syllables) } : null))
+      .map((w) => (w?.syllables.length ? w : null));
+  }
   const song = playJamSong(taps, seats, state.dna, (seat) => {
     const mine = state.glyphs.filter((g) => g.player === seat);
     const g = mine[Math.floor(Math.random() * mine.length)];
     if (g) g.flash = 1;
-  });
+  }, lyrics, showJamLyric);
   state.song = song;
   // a new dance every 4 bars
   state.jamDance = setInterval(() => { if (state.song) startFormation(danceFor('pattern', ++dance), `jam${dance}`); }, song.beat * 16 * 1000);
   setTimeout(() => { if (state.song === song) showJamEnd(); }, song.firstPass * 1000);
+}
+
+// A sung word, big on the screen in the singer's colour, floating up and away.
+function showJamLyric(seat, word) {
+  const el = $('jam-lyric');
+  el.hidden = false;
+  el.textContent = word;
+  el.style.color = rgb(COLORS[seat]);
+  el.style.animation = 'none';
+  void el.offsetWidth; // restart the fade
+  el.style.animation = '';
 }
 
 function showJamEnd() {
@@ -1539,7 +1555,13 @@ function showJamEnd() {
   const d = state.dna;
   $('end-recipe').textContent = `${d.keyName} · ${d.feel}  ·  ${d.bpm} bpm  ·  ${state.jamTaps.length} taps`;
   $('end-secrets').textContent = '';
-  $('end-lyrics-box').hidden = true; // a jam has no words (yet)
+  // the lyrics: each person's glyphs and the words they gave them
+  const room = state.online.room;
+  const lines = room.players.map((p, i) => (p?.glyphs && p.words?.some(Boolean)
+    ? `<li style="color:${rgb(COLORS[i])}">${p.glyphs.map((g, b) => (p.words[b] ? `${escapeHtml(g)} ${escapeHtml(p.words[b])}` : '')).filter(Boolean).join('  ·  ')}</li>`
+    : '')).join('');
+  $('end-lyrics').innerHTML = lines;
+  $('end-lyrics-box').hidden = !lines;
 }
 
 // ── a phone ──
@@ -1573,6 +1595,8 @@ function showJamSetup() {
   $('jam-you').style.color = color;
   const mine = state.online.room.players[state.online.me]?.glyphs || randomGlyphs();
   document.querySelectorAll('.glyph-input').forEach((input, i) => { input.value = mine[i]; input.style.color = color; });
+  const words = state.online.room.players[state.online.me]?.words || [];
+  document.querySelectorAll('.word-input').forEach((input, i) => { input.value = words[i] || ''; });
 }
 
 function renderJamPad(room) {
@@ -1582,6 +1606,7 @@ function renderJamPad(room) {
   const glyphs = room.players[me].glyphs;
   document.querySelectorAll('.pad').forEach((pad, i) => {
     pad.querySelector('b').textContent = glyphs[i] + TEXT_STYLE;
+    pad.querySelector('span').textContent = room.players[me].words?.[i] || ['drum', 'bass', 'chord', 'spark'][i];
     pad.style.color = rgb(COLORS[me]);
     pad.style.borderColor = rgb(COLORS[me]);
   });
@@ -1612,7 +1637,8 @@ $('jam-ready').addEventListener('click', async () => {
   await startAudio(); // your phone plays your taps
   const fallback = randomGlyphs();
   const glyphs = [...document.querySelectorAll('.glyph-input')].map((input, i) => [...input.value.trim()][0] || fallback[i]);
-  state.online.conn.send({ type: 'glyphs', glyphs });
+  const words = [...document.querySelectorAll('.word-input')].map((input) => input.value.trim());
+  state.online.conn.send({ type: 'glyphs', glyphs, words });
 });
 document.querySelectorAll('.pad').forEach((pad) => {
   pad.addEventListener('pointerdown', (e) => {

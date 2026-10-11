@@ -115,6 +115,9 @@ export class Room extends DurableObject {
       // Your 4 buttons: one character each.
       const glyphs = (Array.isArray(msg.glyphs) ? msg.glyphs : []).slice(0, 4).map((g) => [...String(g)].slice(0, 1).join(''));
       if (glyphs.length === 4 && glyphs.every(Boolean)) room.players[slot].glyphs = glyphs;
+      // …and a word for each, sung in the song when that glyph plays (blank = no word).
+      const words = (Array.isArray(msg.words) ? msg.words : []).slice(0, 4);
+      room.players[slot].words = [0, 1, 2, 3].map((i) => String(words[i] ?? '').replace(/[^\p{L}' ]/gu, '').trim().slice(0, 12));
       await this.save();
       this.broadcast({ type: 'room', room: this.publicRoom() });
     } else if (msg.type === 'tap' && room.started && !room.ended && room.players[slot]) {
@@ -306,7 +309,7 @@ export class Room extends DurableObject {
       roundEnds: this.room.roundEnds || [],
       prompts: !!this.room.prompts,
       messages: this.room.messages,
-      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered, glyphs: p.glyphs || null } : null)),
+      players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered, glyphs: p.glyphs || null, words: p.words || null } : null)),
     };
   }
 

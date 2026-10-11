@@ -118,16 +118,18 @@
     <span id="jam-hud-code" class="quiet-text"></span>
     <button id="jam-end" class="quiet">end now</button>
   </div>
+  <p id="jam-lyric" hidden></p>
 
   <!-- jam: your phone -->
   <section id="jam-setup" class="panel" hidden>
     <p class="mode">jam</p>
     <h2 id="jam-you">pick your 4 glyphs</h2>
+    <p class="quiet-text">give each a word if you like: it gets sung when you play it</p>
     <div class="glyph-picks">
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>drum</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>bass</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>chord</span></label>
-      <label><input class="glyph-input" maxlength="2" autocomplete="off"><span>spark</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>drum</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>bass</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>chord</span></label>
+      <label><input class="glyph-input" maxlength="2" autocomplete="off"><input class="word-input" maxlength="12" autocomplete="off" placeholder="word"><span>spark</span></label>
     </div>
     <div class="row">
       <button id="jam-shuffle" class="quiet">shuffle</button>
