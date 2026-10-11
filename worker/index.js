@@ -7,13 +7,18 @@ import { WordLog, wordsWorthCounting } from './words.js';
 
 export { WordLog };
 
-const TOTAL = 8; // messages per duet (4 each)
+// Game modes. A duet is 2 people, 4 messages each; a party is up to 8 people,
+// 2 messages each, in the order they were in the room when the host started.
+const MODES = {
+  duet: { seats: 2, perPlayer: 4 },
+  party: { seats: 8, perPlayer: 2 },
+};
 const MAX_TEXT = 60; // characters per message (the game's box allows the same)
 const MAX_VOICE = 400_000; // a spoken message's recording, base64 (8 s of compressed audio is far less)
 const CODE = /^[A-Z0-9]{4,8}$/;
 // Starting picks for a new player: the first ones the other player isn't using.
-const DEFAULT_VOICES = ['guitar', 'keys', 'flute', 'violin'];
-const DEFAULT_COLORS = ['sky', 'peach', 'mint', 'lilac'];
+const DEFAULT_VOICES = ['guitar', 'keys', 'flute', 'violin', 'harp', 'marimba', 'cello', 'trumpet', 'ocarina', 'banjo'];
+const DEFAULT_COLORS = ['sky', 'peach', 'mint', 'lilac', 'rose', 'gold', 'coral', 'lime'];
 
 export default {
   async fetch(request, env) {
@@ -47,14 +52,22 @@ export default {
 };
 
 export class Room extends DurableObject {
-  // room = { seed, players: [{ id, voice, color } | null, …], messages: [{ player, text }] }
-  async load() {
+  // room = { mode, seed, players: [{ id, voice, color, entered } | null, …],
+  //         order: [seats, in turn order] (set when a party starts), messages: [{ player, text }] }
+  // The first person to open a room decides its mode (duet or party).
+  async load(mode = 'duet') {
     this.room ??= (await this.ctx.storage.get('room')) ?? {
+      mode: MODES[mode] ? mode : 'duet',
       seed: Math.floor(Math.random() * 2 ** 31),
-      players: [null, null],
+      players: Array(MODES[mode]?.seats || 2).fill(null),
+      order: mode === 'party' ? null : [0, 1],
       messages: [],
     };
     return this.room;
+  }
+
+  total() {
+    return (this.room.order?.length || 0) * MODES[this.room.mode].perPlayer;
   }
 
   async save() {
@@ -62,26 +75,28 @@ export class Room extends DurableObject {
   }
 
   async fetch(request) {
-    const room = await this.load();
-    const clientId = new URL(request.url).searchParams.get('id') || crypto.randomUUID();
+    const url = new URL(request.url);
+    const room = await this.load(url.searchParams.get('mode') || 'duet');
+    const clientId = url.searchParams.get('id') || crypto.randomUUID();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
 
     // Same browser coming back gets its old seat; otherwise the first empty one.
     let slot = room.players.findIndex((p) => p?.id === clientId);
-    if (slot < 0) slot = room.players.findIndex((p) => p === null);
+    // New people can take an empty seat — but not once a party has started.
+    if (slot < 0 && !(room.mode === 'party' && room.order)) slot = room.players.findIndex((p) => p === null);
     if (slot < 0) {
-      server.send(JSON.stringify({ type: 'full' }));
+      server.send(JSON.stringify({ type: 'full', started: room.mode === 'party' && !!room.order }));
       server.close(4000, 'room full');
       return new Response(null, { status: 101, webSocket: client });
     }
     if (!room.players[slot]) {
-      const other = room.players[1 - slot];
+      const taken = (key) => room.players.filter(Boolean).map((p) => p[key]);
       room.players[slot] = {
         id: clientId,
-        voice: DEFAULT_VOICES.find((v) => v !== other?.voice),
-        color: DEFAULT_COLORS.find((c) => c !== other?.color),
+        voice: DEFAULT_VOICES.find((v) => !taken('voice').includes(v)),
+        color: DEFAULT_COLORS.find((c) => !taken('color').includes(c)),
         entered: false,
       };
     }
@@ -105,8 +120,9 @@ export class Room extends DurableObject {
 
     if (msg.type === 'say') {
       const text = String(msg.text || '').trim().replace(/\s+/g, ' ').slice(0, MAX_TEXT);
-      const yourTurn = room.messages.length % 2 === slot;
-      if (!text || !yourTurn || room.messages.length >= TOTAL) return;
+      const order = room.order;
+      const yourTurn = !!order && order[room.messages.length % order.length] === slot;
+      if (!text || !yourTurn || room.messages.length >= this.total()) return;
       room.messages.push({ player: slot, text });
       const index = room.messages.length - 1;
       // A spoken message's recording: kept apart from the text, sent to both phones.
@@ -120,11 +136,20 @@ export class Room extends DurableObject {
     } else if (msg.type === 'settings') {
       const me = room.players[slot];
       if (!me) return;
-      const other = room.players[1 - slot];
-      // Instruments and colours are one-per-person: you can't take your partner's.
-      if (typeof msg.voice === 'string' && other?.voice !== msg.voice) me.voice = msg.voice.slice(0, 20);
-      if (typeof msg.color === 'string' && other?.color !== msg.color) me.color = msg.color.slice(0, 20);
+      const others = room.players.filter((p, i) => p && i !== slot);
+      // Instruments and colours are one-per-person: you can't take someone else's.
+      if (typeof msg.voice === 'string' && !others.some((p) => p.voice === msg.voice)) me.voice = msg.voice.slice(0, 20);
+      if (typeof msg.color === 'string' && !others.some((p) => p.color === msg.color)) me.color = msg.color.slice(0, 20);
       if (typeof msg.prompts === 'boolean' && slot === 0) room.prompts = msg.prompts; // shared prompts: host's call
+      await this.save();
+      this.broadcast({ type: 'room', room: this.publicRoom() });
+    } else if (msg.type === 'start') {
+      // The party host starts: everyone in the room right now plays, in seat order.
+      if (room.mode !== 'party' || slot !== 0 || room.order) return;
+      const here = new Set(this.ctx.getWebSockets().map((w) => w.deserializeAttachment()?.slot));
+      room.order = room.players.map((p, i) => (p && here.has(i) ? i : -1)).filter((i) => i >= 0);
+      if (room.order.length < 2) { room.order = null; return; }
+      room.players = room.players.map((p, i) => (room.order.includes(i) ? p : null)); // free the seats of anyone gone
       await this.save();
       this.broadcast({ type: 'room', room: this.publicRoom() });
     } else if (msg.type === 'entered') {
@@ -152,8 +177,10 @@ export class Room extends DurableObject {
   publicRoom(leaving) {
     const online = new Set(this.ctx.getWebSockets().filter((ws) => ws !== leaving).map((ws) => ws.deserializeAttachment()?.slot));
     return {
+      mode: this.room.mode,
       seed: this.room.seed,
-      total: TOTAL,
+      order: this.room.order,
+      total: this.total(),
       prompts: !!this.room.prompts,
       messages: this.room.messages,
       players: this.room.players.map((p, i) => (p ? { voice: p.voice, color: p.color, online: online.has(i), entered: !!p.entered } : null)),

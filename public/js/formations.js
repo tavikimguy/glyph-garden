@@ -3,8 +3,9 @@
 // `setup(rand)` rolls the settings so the same pattern looks different each time;
 // rand is seeded, so both players' screens roll the very same settings.
 //
-// Glyph fields used: fi (index among all), fj (index within its player),
-// fm (index within its message), player, msg.
+// Glyph fields used: fi (index among all), fj (index within its side),
+// fm (index within its message), side (0/1: players split into two groups —
+// in a duet that's simply player 1 vs player 2), msg.
 // ctx: { W, H, cx, cy, R (comfortable radius), n, counts: [p1, p2], msgs, msgSize: [] }
 
 import { PICTURES } from './pictures.js';
@@ -42,9 +43,9 @@ export const FORMATIONS = {
   helix: {
     setup: (rand) => ({ twists: between(rand, 1.5, 3), speed: dir(rand) * between(rand, 1.5, 2.5), tilt: between(rand, -0.25, 0.25) }),
     at: (g, t, c, v) => {
-      const k = c.counts[g.player] > 1 ? g.fj / (c.counts[g.player] - 1) : 0.5;
+      const k = c.counts[g.side] > 1 ? g.fj / (c.counts[g.side] - 1) : 0.5;
       const along = (k - 0.5) * c.W * 0.84;
-      const across = Math.sin(k * Math.PI * 2 * v.twists + t * v.speed + g.player * Math.PI) * c.H * 0.2;
+      const across = Math.sin(k * Math.PI * 2 * v.twists + t * v.speed + g.side * Math.PI) * c.H * 0.2;
       return [c.cx + along - across * Math.sin(v.tilt), c.cy + across + along * Math.sin(v.tilt)];
     },
   },
@@ -77,8 +78,8 @@ export const FORMATIONS = {
   heart: {
     setup: (rand) => ({ speed: dir(rand) * between(rand, 0.15, 0.3), beat: between(rand, 1.5, 2.5) }),
     at: (g, t, c, v) => {
-      const k = g.fj / Math.max(1, c.counts[g.player]);
-      const th = (g.player === 0 ? k * Math.PI : Math.PI + k * Math.PI) + t * v.speed;
+      const k = g.fj / Math.max(1, c.counts[g.side]);
+      const th = (g.side === 0 ? k * Math.PI : Math.PI + k * Math.PI) + t * v.speed;
       const pulse = 1 + Math.sin(t * v.beat * TAU) * 0.04;
       const s = (c.R / 17) * pulse;
       const x = 16 * Math.sin(th) ** 3;
@@ -112,10 +113,10 @@ export const FORMATIONS = {
   binary: {
     setup: (rand) => ({ spin: dir(rand) * between(rand, 0.3, 0.6), inner: dir(rand) * between(rand, 0.8, 1.4) }),
     at: (g, t, c, v) => {
-      const centre = t * v.spin + g.player * Math.PI;
+      const centre = t * v.spin + g.side * Math.PI;
       const ox = c.cx + Math.cos(centre) * c.R * 0.5;
       const oy = c.cy + Math.sin(centre) * c.R * 0.5;
-      const r = (0.15 + 0.85 * Math.sqrt(g.fj / Math.max(1, c.counts[g.player]))) * c.R * 0.42;
+      const r = (0.15 + 0.85 * Math.sqrt(g.fj / Math.max(1, c.counts[g.side]))) * c.R * 0.42;
       const a = g.fj * 2.39996 + t * v.inner;
       return [ox + Math.cos(a) * r, oy + Math.sin(a) * r];
     },
@@ -125,10 +126,10 @@ export const FORMATIONS = {
   conversation: {
     setup: (rand) => ({ speed: between(rand, 1.5, 2.5), lean: between(rand, 0.06, 0.12) }),
     at: (g, t, c, v) => {
-      const side = g.player === 0 ? -1 : 1;
-      const lean = (Math.sin(t * v.speed + g.player * Math.PI) + 1) / 2;
+      const side = g.side === 0 ? -1 : 1;
+      const lean = (Math.sin(t * v.speed + g.side * Math.PI) + 1) / 2;
       const ox = c.cx + side * c.W * (0.24 - lean * v.lean);
-      const r = Math.sqrt((g.fj + 0.5) / Math.max(1, c.counts[g.player])) * c.R * 0.55;
+      const r = Math.sqrt((g.fj + 0.5) / Math.max(1, c.counts[g.side])) * c.R * 0.55;
       const a = g.fj * 2.39996 + t * 0.4 * side;
       return [ox + Math.cos(a) * r, c.cy + Math.sin(a) * r];
     },
@@ -185,8 +186,8 @@ export const FORMATIONS = {
   infinity: {
     setup: (rand) => ({ speed: dir(rand) * between(rand, 0.25, 0.5) }),
     at: (g, t, c, v) => {
-      const k = g.fj / Math.max(1, c.counts[g.player]);
-      const th = k * Math.PI + g.player * Math.PI + t * v.speed;
+      const k = g.fj / Math.max(1, c.counts[g.side]);
+      const th = k * Math.PI + g.side * Math.PI + t * v.speed;
       const d = 1 + Math.sin(th) ** 2;
       return [c.cx + (Math.cos(th) / d) * c.W * 0.38, c.cy + ((Math.sin(th) * Math.cos(th)) / d) * c.H * 0.6];
     },

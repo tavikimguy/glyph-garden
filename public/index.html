@@ -21,46 +21,59 @@
 
   <section id="title" class="panel">
     <h1>Glyph Garden</h1>
-    <p class="mode">duet</p>
-    <p>Two people write to each other. The words get lost in translation — into drifting glyphs,
-      into strange half-heard sounds — until, at the end, they come back as a song.</p>
-    <button id="host">start a duet</button>
+    <div class="modes" role="tablist">
+      <button data-mode="duet" class="on">duet</button>
+      <button data-mode="party">party</button>
+      <button data-mode="diary">diary</button>
+    </div>
+    <p id="mode-blurb"></p>
+    <div id="mode-duet">
+      <button id="host">start a duet</button>
+    </div>
+    <div id="mode-party" hidden>
+      <button id="host-party">start a party</button>
+    </div>
+    <div id="mode-diary" hidden>
+      <button id="diary">open your diary</button>
+    </div>
     <form id="join-form" class="row join">
       <input id="join-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="code" aria-label="room code">
       <button id="join" type="submit">join</button>
     </form>
-    <button id="local" class="quiet">play on one screen</button>
+    <button id="local" class="quiet">play a duet on one screen</button>
     <p class="credit">after <em>“Nuance” Glyph Duet</em> by Iver Kim &amp; Eunsong Shin</p>
     <p class="credit">we count popular words (never whole messages) to choose new pictures to draw</p>
   </section>
 
   <section id="lobby" class="panel" hidden>
     <button id="lobby-back" class="quiet back">← back</button>
-    <p class="mode">duet</p>
+    <p class="mode" id="lobby-mode">duet</p>
     <div id="lobby-code"></div>
     <div class="row">
       <button id="share">share link</button>
     </div>
     <p id="lobby-status" class="quiet-text"></p>
+    <ul id="party-list" hidden></ul>
     <div class="picker">
       <span id="me-label">you</span>
       <select id="my-voice" aria-label="your instrument or voice"></select>
       <div id="my-colors" class="swatches"></div>
     </div>
     <label class="toggle"><input type="checkbox" id="prompts-online"> shared prompts <span id="prompts-note" class="quiet-text"></span></label>
+    <button id="start-party" hidden>start the party</button>
     <button id="enter">enter the garden</button>
   </section>
 
   <section id="local-setup" class="panel" hidden>
     <button id="local-back" class="quiet back">← back</button>
-    <p class="mode">duet · one screen</p>
+    <p class="mode" id="local-mode">duet · one screen</p>
     <div class="pickers">
       <div class="picker">
         <span id="player-0">player 1</span>
         <select id="voice-0" aria-label="player 1 instrument or voice"></select>
         <div id="colors-0" class="swatches"></div>
       </div>
-      <div class="picker">
+      <div class="picker" id="local-p2">
         <span id="player-1">player 2</span>
         <select id="voice-1" aria-label="player 2 instrument or voice"></select>
         <div id="colors-1" class="swatches"></div>
@@ -113,7 +126,7 @@
     <div class="row">
       <button id="replay">stop</button>
       <button id="save" class="quiet">save image</button>
-      <button id="again" class="quiet">new duet</button>
+      <button id="again" class="quiet">play again</button>
     </div>
   </section>
 

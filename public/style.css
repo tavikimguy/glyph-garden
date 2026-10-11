@@ -6,6 +6,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* hidden always wins over a layout style */
 
 html, body {
   margin: 0;
@@ -176,3 +177,11 @@ html, body { position: fixed; inset: 0; overscroll-behavior: none; }
 
 .panel .back { position: absolute; top: 10px; left: 10px; margin: 0; padding: 4px 10px; font-size: 13px; }
 #mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+/* ── game modes ── */
+.modes { display: inline-flex; gap: 4px; margin: 0 0 10px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; }
+.modes button { margin: 0; padding: 5px 14px; border: none; color: var(--dim); font-size: 13px; }
+.modes button.on { background: var(--ink); color: var(--bg); }
+#mode-blurb { min-height: 4.5em; }
+#party-list { list-style: none; padding: 0; margin: 6px 0 10px; font-size: 13px; }
+#party-list li { margin: 2px 0; }

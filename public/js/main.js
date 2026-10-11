@@ -16,16 +16,24 @@ import { songDNA, messageMood } from './songdna.js';
 import { promptFor } from './prompts.js';
 import { connect, newCode } from './online.js';
 
-const PER_PLAYER = 4; // messages each before the song
 const MAX_CHARS = 60; // per message (the room enforces the same limit)
-const TOTAL = PER_PLAYER * 2;
+// Game modes: how many messages each person writes, and how many messages
+// make one "round" (an interlude plays after every round).
+const GAME_MODES = {
+  duet: { perPlayer: 4, label: 'duet' },
+  party: { perPlayer: 2, label: 'party' },
+  diary: { perPlayer: 6, label: 'diary', round: 2 },
+};
+const totalMessages = () => state.order.length * GAME_MODES[state.mode].perPlayer;
+const roundSize = () => GAME_MODES[state.mode].round || state.order.length;
 // A small palette players pick from; COLORS holds each player's current pick.
 const PALETTE = {
   sky: [150, 220, 255], peach: [255, 190, 150], mint: [150, 240, 200],
   lilac: [200, 175, 255], rose: [255, 155, 195], gold: [255, 215, 120],
+  coral: [255, 140, 120], lime: [195, 240, 130],
 };
-const COLORS = [PALETTE.sky, PALETTE.peach];
-const NAMES = ['Player 1', 'Player 2'];
+const COLORS = Object.values(PALETTE); // per seat (up to 8 in a party)
+const NAMES = Array.from({ length: 8 }, (_, i) => `Player ${i + 1}`);
 
 const $ = (id) => document.getElementById(id);
 const show = (id) => {
@@ -34,7 +42,9 @@ const show = (id) => {
 
 const state = {
   phase: 'title',
-  banks: [null, null],
+  banks: Array(8).fill(null),
+  mode: 'duet', // duet · party · diary
+  order: [0, 1], // seats, in turn order
   cipher: null, // set from the seed below
   messages: [], // { player, text, words: [{ word, syllables }] }
   glyphs: [],
@@ -122,20 +132,20 @@ function endBank(skipped) {
   state.banks[state.bankPlayer] = !skipped && hasClips
     ? finishBank(state.clips)
     : robotVoice(state.robots[state.bankPlayer]);
-  if (state.bankPlayer === 0) startBank(1);
+  if (state.bankPlayer === 0 && state.mode !== 'diary') startBank(1);
   else startWriting();
 }
 
 // ───────────────────────── writing turns ─────────────────────────
 
 function currentPlayer() {
-  return state.messages.length % 2;
+  return state.order[state.messages.length % state.order.length];
 }
 
 // The round's prompt sits right above the typing box (and on the "their turn" screen).
 function showRoundPrompt(on) {
   const visible = on && state.prompts;
-  const text = visible ? promptFor(state.seed, Math.floor(state.messages.length / 2)) : '';
+  const text = visible ? promptFor(state.seed, Math.floor(state.messages.length / roundSize())) : '';
   for (const el of document.querySelectorAll('.prompt')) {
     el.hidden = !visible;
     el.textContent = text;
@@ -149,13 +159,15 @@ function startWriting() {
   if (state.online && player !== state.online.me) {
     state.phase = 'their-turn';
     show('waiting');
+    $('waiting-who').textContent = state.mode === 'party' ? `${NAMES[player].toLowerCase()}’s turn` : 'their turn';
     $('waiting-who').style.color = rgb(COLORS[player]);
-    $('waiting-note').textContent = `message ${state.messages.length + 1} / ${TOTAL}`;
+    $('waiting-note').textContent = `message ${state.messages.length + 1} / ${totalMessages()}`;
     return;
   }
   state.phase = 'write';
   show('write');
-  $('write-who').textContent = state.online ? 'your turn' : `${NAMES[player]}, say something`;
+  $('write-who').textContent = state.online ? 'your turn'
+    : state.mode === 'diary' ? 'dear diary…' : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
   $('message').value = '';
   state.spoken = null;
@@ -284,14 +296,15 @@ async function decodeVoice({ data, mime }) {
 
 function afterSend() {
   const n = state.messages.length;
-  if (n >= TOTAL) return startFinale();
-  if (n % 2 === 1) return startWriting();
+  if (n >= totalMessages()) return startFinale();
+  if (n % roundSize() !== 0) return startWriting();
 
   // A round is done: play the strange, half-heard interlude.
   state.phase = 'interlude';
-  const round = n / 2;
+  const round = n / roundSize();
+  const rounds = totalMessages() / roundSize();
   const items = [];
-  for (let m = n - 2; m < n; m++) {
+  for (let m = n - roundSize(); m < n; m++) {
     const message = state.messages[m];
     let k = 0;
     message.words.forEach((w, wi) => {
@@ -299,19 +312,15 @@ function afterSend() {
       w.syllables.forEach((syl) => items.push({ syl, player: message.player, glyphs, message, n: k++ }));
     });
   }
-  const seconds = playInterlude(items, state.banks, (round / PER_PLAYER) * 0.7, (item) => {
+  const seconds = playInterlude(items, state.banks, (round / rounds) * 0.7, (item) => {
     item.glyphs.forEach((g) => { g.flash = 1; });
   });
-  // A pattern first, then every picture earned this round (both people's words,
-  // several in one sentence…), one after another. No new picture words? A second dance.
-  const before = earnedPictures(state.messages.slice(0, n - 2));
-  const fresh = earnedPictures().filter((name) => !before.includes(name));
-  const next = fresh.length ? fresh : [danceFor('picture', round - 1)];
-  startFormation(danceFor('pattern', round - 1), `interlude${round}a`);
-  const share = 0.65 / next.length;
-  next.forEach((name, i) => {
-    setTimeout(() => { if (state.phase === 'interlude') startFormation(name, `interlude${round}-${i}`); }, seconds * 1000 * (0.3 + i * share));
-  });
+  // Two dances, max (see interludeDances for the rules).
+  const { dances, golden } = interludeDances(state.messages.slice(n - roundSize(), n), round);
+  startFormation(dances[0], `interlude${round}a`, golden === 0);
+  setTimeout(() => {
+    if (state.phase === 'interlude') startFormation(dances[1], `interlude${round}b`, golden === 1);
+  }, seconds * 1000 * 0.45);
   setTimeout(() => {
     endFormation();
     startWriting();
@@ -431,8 +440,8 @@ function spawnMessage(msg, m) {
   // Wide screens: player 1 from the left, player 2 from the right.
   // Tall phone screens: your words rise from the bottom, theirs fall from the top.
   const portrait = P.height > P.width;
-  const mine = state.online ? msg.player === state.online.me : msg.player === 0;
-  const fromLeft = msg.player === 0;
+  const mine = state.online ? msg.player === state.online.me : msg.player === state.order[0];
+  const fromLeft = state.order.indexOf(msg.player) % 2 === 0;
   const fromBottom = mine;
   const origin = portrait ? P.width * (0.25 + Math.random() * 0.5) : P.height * (0.25 + Math.random() * 0.5);
   const aim = (Math.random() - 0.5) * 0.5; // the whole throw angles a little
@@ -555,6 +564,37 @@ function danceFor(kind, slot) {
   return order[(slot * 2 + (kind === 'picture' ? 1 : 0)) % order.length];
 }
 
+// The picture words in one message, in the order said ("I love cats" → heart, cat).
+function picturesIn(message) {
+  const found = [];
+  for (const word of message.text.toLowerCase().match(/[a-z']+/g) || []) {
+    const name = Object.keys(PICTURE_WORDS).find((pic) => PICTURE_WORDS[pic].includes(word));
+    if (name && !found.includes(name)) found.push(name);
+  }
+  return found;
+}
+
+// The interlude's two dances:
+//  · both people earned a picture → their picture, then the other's (no pattern)
+//  · otherwise → a pattern, then ONE picture:
+//      a picture 2+ of you said wins (and glows gold), else the one said last
+//  · no picture words → a pattern, then another pattern
+// Pictures that miss out aren't lost: the finale works through all of them.
+function interludeDances(roundMessages, round) {
+  const per = roundMessages.map(picturesIn);
+  const shared = per.flat().find((pic) => per.filter((list) => list.includes(pic)).length >= 2) || null;
+  const lastSaid = (list) => list[list.length - 1];
+  if (roundMessages.length === 2 && per[0].length && per[1].length && !shared) {
+    return { dances: [lastSaid(per[0]), lastSaid(per[1])], golden: -1 };
+  }
+  const all = per.flat();
+  const pick = shared || lastSaid(all);
+  return {
+    dances: [danceFor('pattern', round - 1), pick || danceFor('picture', round - 1)],
+    golden: shared ? 1 : -1,
+  };
+}
+
 // Pictures someone has "earned" by saying their word (cat, moon, love…), in the order first said.
 function earnedPictures(messages = state.messages) {
   const earned = [];
@@ -597,18 +637,20 @@ function hueToRgb(h) {
 
 // A glyph's colour: its dye if a picture coloured it, else its player's colour.
 function tintOf(g, now) {
+  if (state.formation?.golden && g.mode === 'form') return [255, 215, 120];
   if (g.tint === 'rainbow') return hueToRgb((g.fi * 9 + now / 25) % 360);
   return g.tint || COLORS[g.player];
 }
 
 // slot = a name for this moment ("interlude2b", "song0-4"); with the seed it
 // fixes the dance's settings so every phone rolls the same ones.
-function startFormation(name, slot) {
+function startFormation(name, slot, golden = false) {
   const counts = [0, 0];
   const msgSize = [];
   state.glyphs.forEach((g, i) => {
     g.fi = i;
-    g.fj = counts[g.player]++;
+    g.side = state.order.indexOf(g.player) % 2; // two groups, alternating in turn order
+    g.fj = counts[g.side]++;
     g.fm = msgSize[g.msg] || 0;
     msgSize[g.msg] = g.fm + 1;
     if (g.mode !== 'stage') g.mode = 'form';
@@ -616,6 +658,7 @@ function startFormation(name, slot) {
   const dye = latestColor();
   if (dye) state.glyphs.forEach((g) => { g.tint = dye; }); // the shape takes the colour, for good
   state.formation = {
+    golden, // you both said this picture's word: it glows gold
     name,
     pattern: FORMATIONS[name],
     params: FORMATIONS[name].setup(seededRandom(hash(`${state.seed}:${slot}:${name}`))),
@@ -891,7 +934,20 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 }
 
-$('local').addEventListener('click', () => show('local-setup'));
+$('local').addEventListener('click', () => {
+  state.mode = 'duet';
+  state.order = [0, 1];
+  showLocalSetup();
+});
+function showLocalSetup() {
+  const diary = state.mode === 'diary';
+  $('local-mode').textContent = diary ? 'diary' : 'duet · one screen';
+  $('local-p2').hidden = diary;
+  $('player-0').textContent = diary ? 'you' : 'player 1';
+  $('begin').textContent = diary ? 'record your own voice instead' : 'record your own voices instead';
+  showPickers();
+  show('local-setup');
+}
 $('begin').addEventListener('click', async () => {
   await startAudio();
   state.started = true;
@@ -902,6 +958,7 @@ $('robots').addEventListener('click', async () => {
   state.started = true;
   state.banks = state.robots.map(robotVoice);
   startWriting();
+
 });
 
 // Title screen: each player picks a robot voice (dropdown, previews on change)
@@ -913,7 +970,7 @@ function showPickers() {
     $(`colors-${p}`).querySelectorAll('button').forEach((btn) => {
       const mine = PALETTE[btn.dataset.color] === COLORS[p];
       btn.classList.toggle('on', mine);
-      btn.disabled = PALETTE[btn.dataset.color] === COLORS[1 - p];
+      btn.disabled = state.mode !== 'diary' && PALETTE[btn.dataset.color] === COLORS[1 - p]; // diary: no one else
     });
   });
 }
@@ -964,7 +1021,7 @@ let lastTyping = 0;
 // "message 3/8 · 12/60" under the box; turns gold near the limit.
 function updateCount() {
   const used = cleanText($('message').value).length;
-  $('write-count').textContent = `message ${state.messages.length + 1}/${TOTAL} · ${used}/${MAX_CHARS}`;
+  $('write-count').textContent = `message ${state.messages.length + 1}/${totalMessages()} · ${used}/${MAX_CHARS}`;
   $('write-count').classList.toggle('near', used >= MAX_CHARS - 10);
 }
 
@@ -991,13 +1048,15 @@ async function startAudio() {
   await initAudio();
 }
 
-function openLobby(code) {
+// mode only matters when creating a room; joiners get whatever mode the room is.
+function openLobby(code, mode = 'duet') {
   state.online = { code, me: null, room: null, conn: null };
   try { history.replaceState(null, '', `?room=${code}`); } catch { /* ignore */ }
   show('lobby');
   $('lobby-code').textContent = code;
   $('lobby-status').textContent = 'connecting…';
-  state.online.conn = connect(code, { message: onRoom, status: onConnection });
+  $('party-list').innerHTML = '';
+  state.online.conn = connect(code, { message: onRoom, status: onConnection }, mode);
 }
 
 function shareLink() {
@@ -1009,7 +1068,7 @@ function onConnection(status) {
   if (status === 'full') {
     show('title');
     banner.hidden = false;
-    banner.textContent = 'that duet is full — start your own';
+    banner.textContent = 'that room is full (or the party already started) — start your own';
     state.online.conn.close();
     state.online = null;
     return;
@@ -1021,6 +1080,7 @@ function onConnection(status) {
 // Copy the room's latest picks onto this phone: voices, colours, who's here.
 function applyRoom(room) {
   state.online.room = room;
+  if (room.order) state.order = room.order;
   state.prompts = !!room.prompts;
   if (state.phase === 'write' || state.phase === 'their-turn') showRoundPrompt(true);
   room.players.forEach((p, i) => {
@@ -1040,8 +1100,9 @@ function applyRoom(room) {
 // "player 1" / "player 2", from your point of view.
 const partnerName = () => `player ${2 - state.online.me}`;
 
-// What the other person is doing. inGarden = shown to someone already playing.
+// What the others are doing. inGarden = shown to someone already playing.
 function partnerNote(room, inGarden) {
+  if (room.mode === 'party') return partyNote(room, inGarden);
   const them = room.players[1 - state.online.me];
   if (!them) return inGarden ? 'waiting for them to join — send the link' : 'send them the link or the code — waiting for them to join';
   if (!them.online) return `${partnerName()} left — they can come back with the same link`;
@@ -1049,12 +1110,44 @@ function partnerNote(room, inGarden) {
   return inGarden ? `waiting for ${partnerName()} to enter the garden` : `${partnerName()} is here — picking their sound`;
 }
 
+// Party: who's missing from the garden (or, in the lobby, who's here).
+function partyNote(room, inGarden) {
+  const me = state.online.me;
+  if (!room.order) {
+    const here = room.players.filter((p) => p?.online).length;
+    if (me !== 0) return `${here} here — waiting for the host to start`;
+    return here < 2 ? 'send the link or code — you need at least 2 people' : `${here} here — start when everyone’s in`;
+  }
+  const gone = room.order.filter((i) => i !== me && !room.players[i]?.online);
+  const outside = room.order.filter((i) => i !== me && room.players[i]?.online && !room.players[i].entered);
+  if (gone.length) return `${NAMES[gone[0]].toLowerCase()} left — they can come back with the same link`;
+  if (outside.length) return inGarden ? `waiting for ${outside.map((i) => NAMES[i].toLowerCase()).join(', ')} to enter` : 'the party has started ✶';
+  return inGarden ? '' : 'the party has started ✶';
+}
+
 function renderLobby() {
   const { room, me } = state.online;
-  const them = room.players[1 - me];
+  const others = room.players.filter((p, i) => p && i !== me);
+  const party = room.mode === 'party';
+  $('lobby-mode').textContent = party ? 'party' : 'duet';
   $('lobby-status').textContent = partnerNote(room, false);
-  // Your partner's instrument is theirs: grey it out in your list.
-  for (const option of $('my-voice').options) option.disabled = option.value === them?.voice;
+  // Someone else's instrument is theirs: grey it out in your list.
+  for (const option of $('my-voice').options) option.disabled = others.some((p) => p.voice === option.value);
+  // Party: the guest list, and the host's start button.
+  $('party-list').hidden = !party;
+  if (party) {
+    $('party-list').innerHTML = room.players.map((p, i) => (p && (p.online || room.order?.includes(i))
+      ? `<li style="color:${rgb(COLORS[i])}">${NAMES[i].toLowerCase()}${i === me ? ' (you)' : ''}${i === 0 ? ' · host' : ''} — ${escapeHtml(p.voice)}</li>`
+      : '')).join('');
+  }
+  const started = !party || !!room.order;
+  $('start-party').hidden = !party || me !== 0 || started;
+  $('start-party').disabled = room.players.filter((p) => p?.online).length < 2;
+  $('enter').hidden = !started;
+  if (state.online.autoEnter && started) {
+    state.online.autoEnter = false;
+    enterGarden();
+  }
   $('me-label').textContent = me === 0 ? 'you (first)' : 'you';
   $('prompts-online').checked = !!room.prompts;
   $('prompts-online').disabled = me !== 0; // the host decides
@@ -1063,7 +1156,7 @@ function renderLobby() {
   $('my-voice').value = room.players[me].voice;
   $('my-colors').querySelectorAll('button').forEach((btn) => {
     btn.classList.toggle('on', btn.dataset.color === room.players[me].color);
-    btn.disabled = btn.dataset.color === them?.color;
+    btn.disabled = others.some((p) => p.color === btn.dataset.color);
   });
 }
 
@@ -1091,17 +1184,17 @@ function onRoom(msg) {
     }
     if (state.messages.length + state.inbox.length > msg.index) return; // already have it
     state.inbox.push(msg);
+    if (state.phase === 'their-turn' || state.phase === 'sending') receiveNext();
   } else if (msg.type === 'voice') {
     const voice = { data: msg.data, mime: msg.mime };
     if (state.messages[msg.index]) attachVoice(state.messages[msg.index], voice);
     else state.lateVoices[msg.index] = voice;
-    if (state.phase === 'their-turn' || state.phase === 'sending') receiveNext();
   } else if (msg.type === 'typing') {
     if (state.phase === 'their-turn') {
       $('waiting-note').textContent = 'they’re writing…';
       clearTimeout(online.typingTimer);
       online.typingTimer = setTimeout(() => {
-        $('waiting-note').textContent = `message ${state.messages.length + 1} / ${TOTAL}`;
+        $('waiting-note').textContent = `message ${state.messages.length + 1} / ${totalMessages()}`;
       }, 2500);
     }
   } else if (msg.type === 'reset') {
@@ -1120,18 +1213,50 @@ function onRoom(msg) {
 async function enterGarden() {
   await startAudio();
   state.started = true;
+  state.mode = state.online.room.mode;
+  state.order = state.online.room.order;
   state.online.conn.send({ type: 'entered' });
   state.seed = state.online.room.seed;
   state.cipher = makeCipher(state.seed);
   for (const m of state.online.room.messages) receive(m.player, m.text, true);
-  if (state.messages.length >= TOTAL) setTimeout(startFinale, 1500);
+  if (state.messages.length >= totalMessages()) setTimeout(startFinale, 1500);
   else startWriting();
   const note = partnerNote(state.online.room, true);
   $('status').hidden = !note;
   $('status').textContent = note;
 }
 
-$('host').addEventListener('click', () => openLobby(newCode()));
+$('host').addEventListener('click', () => openLobby(newCode(), 'duet'));
+$('host-party').addEventListener('click', () => openLobby(newCode(), 'party'));
+// The host starts the party (and walks straight into the garden once it's set up).
+$('start-party').addEventListener('click', async () => {
+  await startAudio(); // start sound now, while we still have the tap
+  state.online.autoEnter = true;
+  state.online.conn.send({ type: 'start' });
+});
+
+// ── title screen: pick a game mode ──
+const BLURBS = {
+  duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
+  party: 'Up to 8 people in one garden. Everyone adds two lines, in turn; the song braids all your voices together.',
+  diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
+};
+function pickMode(mode) {
+  document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  $('mode-blurb').textContent = BLURBS[mode];
+  for (const m of ['duet', 'party', 'diary']) $(`mode-${m}`).hidden = m !== mode;
+  $('join-form').hidden = mode === 'diary';
+  $('local').hidden = mode !== 'duet';
+}
+document.querySelector('.modes').addEventListener('click', (e) => { if (e.target.dataset.mode) pickMode(e.target.dataset.mode); });
+pickMode('duet');
+
+// Diary: the one-screen setup, with just you.
+$('diary').addEventListener('click', () => {
+  state.mode = 'diary';
+  state.order = [0];
+  showLocalSetup();
+});
 // ← back from the duet lobby: leave the room and go home.
 $('lobby-back').addEventListener('click', () => {
   state.online?.conn.close();
