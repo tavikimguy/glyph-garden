@@ -174,6 +174,10 @@ export async function initAudio() {
   voiceIn.connect(shifter);
   // Recordings are much hotter than the robot voices; this keeps them from burying the drums.
   const recordedIn = new Tone.Gain(0.4).connect(voiceIn);
+  // Each person's instrument when it's their line in the song: clean, louder, a little room + echo.
+  const soloBus = new Tone.Gain(1.6).connect(limiter);
+  soloBus.connect(new Tone.Gain(0.3).connect(reverb));
+  soloBus.connect(new Tone.Gain(0.15).connect(delay));
   // Your own spoken words in the song: no grit, chorus or octave ghost — just a little room.
   const cleanVoice = new Tone.Gain(0.55).connect(limiter);
   cleanVoice.connect(new Tone.Gain(0.25).connect(reverb));
@@ -186,7 +190,7 @@ export async function initAudio() {
       : new Tone.Gain(1).connect(voiceIn);
   }
 
-  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, cleanVoice, robotIn, muffle, crusher, harmony };
+  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, cleanVoice, soloBus, robotIn, muffle, crusher, harmony };
   newChimes();
   setKey(DEFAULT_KEY);
   startAmbience();
@@ -432,22 +436,30 @@ function singFromRobot(voice, syl, time, freq, dur) {
 }
 
 // One persistent instrument per voice, like the robot "mouth".
+// Each instrument has two outputs: through the scrambling voice effects (interludes),
+// or clean and up front (the song, where each person's instrument is the soloist).
 function instrumentEngine(voice) {
   if (voice.engine) return voice.engine;
   const spec = INSTRUMENTS[voice.instrument];
   const synth = spec.make();
   const chain = spec.fx ? spec.fx() : [];
-  synth.chain(...chain, fx.voiceIn);
-  voice.engine = { synth, mono: !(synth instanceof Tone.PolySynth), last: 0 };
+  const out = new Tone.Gain(1);
+  synth.chain(...chain, out);
+  const scrambled = new Tone.Gain(1).connect(fx.voiceIn);
+  const featured = new Tone.Gain(0).connect(fx.soloBus);
+  out.fan(scrambled, featured);
+  voice.engine = { synth, scrambled, featured, mono: !(synth instanceof Tone.PolySynth), last: 0 };
   return voice.engine;
 }
 
-function playInstrument(voice, time, freq, dur) {
+function playInstrument(voice, time, freq, dur, solo = false) {
   const e = instrumentEngine(voice);
   // One-note instruments can't go back in time (e.g. quick previews overlapping).
   const t = e.mono ? Math.max(time, e.last + 0.01) : time;
+  e.featured.gain.setValueAtTime(solo ? 1 : 0, t);
+  e.scrambled.gain.setValueAtTime(solo ? 0 : 1, t);
   e.synth.triggerAttackRelease(freq, dur, t, 0.9);
-  e.last = t + dur;
+  e.last = t; // a new note may start while this one still rings
 }
 
 // The nearest note of the key's pentatonic scale: the 5 notes that always sound
@@ -501,9 +513,10 @@ function singRecorded(sung, n, time, freq, dur, reverse = false) {
 }
 
 // voice = a recorded bank ({ clips }), a robot ({ robot: 'silk' }) or an instrument ({ instrument: 'guitar' }).
-function sing(voice, syl, time, freq, dur, reverse = false) {
+// solo = the song's featured line: an instrument plays clean and up front, ringing on.
+function sing(voice, syl, time, freq, dur, reverse = false, solo = false) {
   if (voice?.clips) singFromBank(voice, syl, time, freq, dur, reverse);
-  else if (voice?.instrument) playInstrument(voice, time, freq, dur);
+  else if (voice?.instrument) playInstrument(voice, time, freq, solo ? dur * 1.8 : dur, solo);
   else singFromRobot(voice || robotVoice('velvet'), syl, time, freq, dur);
 }
 
@@ -664,7 +677,8 @@ function makeSnareAndHat(kit, drums, keep, quieter = 0) {
 }
 
 // The band builds: 0 pad + arpeggio · 1 + bass · 2 + kick & hats · 3 + snare & high pad · 4 everything, busier.
-function playSection(dna, { start, end, chord, level, crash }) {
+// feature = someone's line is playing: the band's lead steps back to leave them room.
+function playSection(dna, { start, end, chord, level, crash, feature = false }) {
   const beatLen = 60 / dna.bpm;
   const six = beatLen / 4;
   const length = end - start;
@@ -683,9 +697,13 @@ function playSection(dna, { start, end, chord, level, crash }) {
     const step = k % 16;
     const t = start + k * six + (k % 2 ? dna.swing * six : 0); // swing pushes the off-steps late
     const fill = level >= 3 && totalSteps >= 8 && k >= totalSteps - 4; // snare roll into the next part
-    if (k % rate === 0) band.lead.triggerAttackRelease(tones[shape[(k / rate) % shape.length]], '16n', t, step % 4 === 0 ? 0.45 : 0.25);
+    if (feature) {
+      if (step % 4 === 0) band.lead.triggerAttackRelease(tones[shape[(k >> 2) % shape.length]], '16n', t, 0.12); // just a soft pulse
+    } else if (k % rate === 0) {
+      band.lead.triggerAttackRelease(tones[shape[(k / rate) % shape.length]], '16n', t, step % 4 === 0 ? 0.45 : 0.25);
+    }
     // the stacked second lead answers on the in-between steps, an octave up, going the other way
-    if (band.lead2 && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
+    if (band.lead2 && !feature && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
     if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
     if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
     if (level >= 2 && beat.hat.includes(step)) band.hat.triggerAttackRelease(0.02, t, 0.7);
@@ -745,16 +763,26 @@ function schedulePass(song, passStart, pass) {
         const len = (n === syls.length - 1 ? 4 : steps) * six;
         const when = t;
         const freq = scale[notes[n]];
-        soon(when, () => sing(voice, s, when, freq, len * 0.95));
+        soon(when, () => sing(voice, s, when, freq, len * 0.95, false, true));
         at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
         t += len;
       });
     }
-    const section = {
-      start: msgStart, end: onBeat(t), chord: chordFor(dna, dna.progression[m % dna.progression.length]),
-      level: levelFor(m), crash: m === 0 || m === last - 1,
-    };
-    soon(section.start, () => playSection(dna, section));
+    const chord = chordFor(dna, dna.progression[m % dna.progression.length]);
+    const lineEnd = onBeat(t);
+    soon(msgStart, () => playSection(dna, { start: msgStart, end: lineEnd, chord, level: levelFor(m), crash: m === 0 || m === last - 1, feature: true }));
+    // The answer: one beat where the band fills back in and the line's instrument
+    // echoes its last two notes an octave up — then it's the next person's turn.
+    const answerEnd = lineEnd + beatLen;
+    soon(lineEnd, () => playSection(dna, { start: lineEnd, end: answerEnd, chord, level: levelFor(m) }));
+    if (voice?.instrument && !msg.sung && syls.length) {
+      const echo = notes.slice(-2).map((i) => scale[i] * 2);
+      echo.forEach((freq, i) => {
+        const when = lineEnd + i * (beatLen / 2);
+        soon(when, () => playInstrument(voice, when, freq, beatLen * 0.7, true));
+      });
+    }
+    t = answerEnd;
   });
 
   // One bar back home on the first chord, then go round again.
