@@ -450,15 +450,16 @@ function playInstrument(voice, time, freq, dur) {
   e.last = t + dur;
 }
 
-// The nearest note of the song's key (all 7 notes, so the nudge is as small as possible).
+// The nearest note of the key's pentatonic scale: the 5 notes that always sound
+// good over the chords, so a sung syllable can never land on a clashing note.
 function nearestInKey(freq, k) {
   const midi = 69 + 12 * Math.log2(freq / 440);
-  const { steps } = MODES[k.mode];
+  const { steps, penta } = MODES[k.mode];
   let best = midi;
   let bestDistance = Infinity;
   for (let oct = -1; oct <= 9; oct++) {
-    for (const step of steps) {
-      const note = 12 * oct + k.root + step;
+    for (const degree of penta) {
+      const note = 12 * oct + k.root + steps[degree];
       if (Math.abs(note - midi) < bestDistance) { bestDistance = Math.abs(note - midi); best = note; }
     }
   }
@@ -466,7 +467,7 @@ function nearestInKey(freq, k) {
 }
 
 // A spoken message in the song: syllable n played as you said it, just tuned to the
-// nearest note (at most ~2 semitones) and sent down a clean path — so it's your voice.
+// nearest pentatonic note (at most ~2 semitones) and sent down a clean path — so it's your voice.
 function singNatural(sung, n, time, k) {
   const seg = sung.segments[n];
   const rate = seg.pitch ? Math.min(1.12, Math.max(0.89, nearestInKey(seg.pitch, k) / seg.pitch)) : 1;
