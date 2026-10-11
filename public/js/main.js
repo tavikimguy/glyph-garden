@@ -400,10 +400,15 @@ function startFinale() {
     onMessage(m, pass) {
       if (state.focus >= 0) decode(state.focus, Infinity);
       state.focus = m; // its glyphs light up where they are; the lyric shows centre stage
-      // A new move every two messages, alternating patterns and pictures.
-      if (m % 2 === 0) {
-        const slot = 4 + pass * 4 + m / 2;
-        startFormation(danceFor(m % 4 === 0 ? 'pattern' : 'picture', slot), `song${pass}-${m}`);
+      // The dance follows the words: a line with a picture word ("a big cat!") dances
+      // that picture; other lines get patterns — a new one every two lines, or right
+      // away if a picture from the last line would otherwise linger.
+      const pictures = picturesIn(state.messages[m]);
+      const showingPicture = !!PICTURE_WORDS[state.formation?.name];
+      if (pictures.length) {
+        startFormation(pictures[pictures.length - 1], `song${pass}-${m}`);
+      } else if (m % 2 === 0 || showingPicture) {
+        startFormation(danceFor('pattern', 4 + pass * 8 + m), `song${pass}-${m}`);
       }
     },
     onSyllable(m, wi, si) {
