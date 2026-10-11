@@ -1,0 +1,675 @@
+// Sound engine: rain plinks, an always-on ambient bed, a singer that rebuilds
+// words out of a voice bank (or a robot voice), and a finale band built from
+// the conversation's song DNA (see songdna.js).
+
+import { hash } from './glyphs.js';
+import { getClip, findSyllable, findOnset } from './voicebank.js';
+import { MODES } from './songdna.js';
+
+// The current key. It follows the conversation (setKey after each message),
+// so the whole space drifts into new keys as people talk.
+const DEFAULT_KEY = { root: 0, mode: 'major', progression: [0, 5, 3, 4] };
+let key = DEFAULT_KEY;
+let keyRain = null; // raindrop notes in the current key
+
+const midiNote = (m) => Tone.Frequency(m, 'midi').toNote();
+
+// 4-note chord on scale degree `deg` of key k, voiced around C3.
+function chordFor(k, deg) {
+  const { steps } = MODES[k.mode];
+  return [0, 2, 4, 6].map((n) => {
+    const d = deg + n;
+    return midiNote(48 + k.root + steps[d % 7] + 12 * Math.floor(d / 7));
+  });
+}
+
+// The 5 "safe" notes of the key, two octaves up high: raindrops and chimes.
+function rainNotes(k) {
+  const { steps, penta } = MODES[k.mode];
+  return [0, 12].flatMap((o) => penta.map((d) => midiNote(72 + k.root + steps[d] + o)));
+}
+
+export function setKey(dna) {
+  key = dna;
+  keyRain = rainNotes(dna);
+}
+
+// Compound vowels are sung as a quick glide into the main vowel (ㅑ = ㅣ→ㅏ).
+const VOWEL_SOUND = {
+  'ㅐ': ['ㅔ'], 'ㅑ': ['ㅣ', 'ㅏ'], 'ㅒ': ['ㅣ', 'ㅔ'], 'ㅕ': ['ㅣ', 'ㅓ'], 'ㅖ': ['ㅣ', 'ㅔ'],
+  'ㅛ': ['ㅣ', 'ㅗ'], 'ㅠ': ['ㅣ', 'ㅜ'], 'ㅘ': ['ㅜ', 'ㅏ'], 'ㅙ': ['ㅜ', 'ㅔ'], 'ㅚ': ['ㅜ', 'ㅔ'],
+  'ㅝ': ['ㅜ', 'ㅓ'], 'ㅞ': ['ㅜ', 'ㅔ'], 'ㅟ': ['ㅜ', 'ㅣ'], 'ㅢ': ['ㅡ', 'ㅣ'],
+};
+
+// Vowel "shapes" for robot voices: the three resonant frequencies (formants).
+const FORMANTS = {
+  'ㅏ': [800, 1200, 2500], 'ㅓ': [600, 1000, 2400], 'ㅗ': [450, 800, 2400], 'ㅜ': [330, 750, 2300],
+  'ㅡ': [350, 1350, 2400], 'ㅣ': [280, 2300, 3000], 'ㅔ': [480, 1900, 2600],
+};
+const FRICATIVES = new Set(['ㅅ', 'ㅈ', 'ㅊ', 'ㅎ']);
+
+// Robot voices. base = singing pitch (Hz); shift > 1 moves the vowel shapes up,
+// which is what makes a voice sound smaller/lighter (more "feminine"), not just higher.
+// osc = the raw tone (buzzy saw, hollow square, metallic AM…); scoop = slide into notes.
+const ROBOTS = {
+  velvet: { base: 125, shift: 1.0, osc: { type: 'sawtooth' }, breath: 0.03, vibrato: [4.5, 0.08], scoop: true },
+  silk: { base: 245, shift: 1.18, osc: { type: 'sawtooth' }, breath: 0.12, vibrato: [5.5, 0.12], scoop: true },
+  choir: { base: 185, shift: 1.08, osc: { type: 'fatsawtooth', count: 3, spread: 30 }, breath: 0.04, vibrato: [5, 0.1], scoop: true },
+  glass: { base: 330, shift: 1.25, osc: { type: 'fmsine', harmonicity: 2, modulationIndex: 2 }, breath: 0, vibrato: [6, 0.06], scoop: true },
+  ghost: { base: 200, shift: 1.12, osc: null, breath: 1, vibrato: [0, 0], scoop: false }, // a whisper
+  android: { base: 160, shift: 1.0, osc: { type: 'amsquare', harmonicity: 0.5 }, breath: 0, vibrato: [0, 0], scoop: false },
+  pixel: { base: 300, shift: 1.2, osc: { type: 'square' }, breath: 0, vibrato: [7, 0.05], scoop: false },
+  baritone: { base: 95, shift: 0.9, osc: { type: 'fatsawtooth', count: 2, spread: 15 }, breath: 0.05, vibrato: [4, 0.1], scoop: true },
+  pixie: { base: 420, shift: 1.35, osc: { type: 'fmsawtooth', harmonicity: 1, modulationIndex: 1.5 }, breath: 0.1, vibrato: [6.5, 0.1], scoop: true },
+  auto: { base: 200, shift: 1.05, osc: { type: 'pwm', modulationFrequency: 0.4 }, breath: 0, vibrato: [0, 0], scoop: false }, // hard autotune
+  vapor: { base: 150, shift: 0.95, osc: { type: 'fatsawtooth', count: 5, spread: 50 }, breath: 0.1, vibrato: [3, 0.2], scoop: true },
+};
+// Instrument "voices": the player's melody played on an instrument instead of sung.
+// make() builds the instrument; base = the pitch range it plays around.
+const INSTRUMENTS = {
+  guitar: { base: 200, make: () => new Tone.PluckSynth({ attackNoise: 1.2, dampening: 3800, resonance: 0.97, volume: -2 }) },
+  electric: {
+    base: 220,
+    make: () => new Tone.PluckSynth({ attackNoise: 2, dampening: 5000, resonance: 0.985, volume: -6 }),
+    fx: () => [new Tone.Distortion(0.5), new Tone.Chorus(2, 3, 0.5).start()],
+  },
+  keys: { base: 260, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 3, modulationIndex: 10, envelope: { attack: 0.005, decay: 1.2, sustain: 0.1, release: 1 }, modulationEnvelope: { attack: 0.002, decay: 0.5, sustain: 0, release: 0.5 }, volume: -10 }) },
+  flute: { base: 520, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sine' }, envelope: { attack: 0.06, decay: 0.1, sustain: 0.8, release: 0.2 }, volume: -8 }), fx: () => [new Tone.Vibrato(5, 0.08)] },
+  brass: { base: 230, make: () => new Tone.MonoSynth({ oscillator: { type: 'sawtooth' }, filter: { Q: 2 }, filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.6, baseFrequency: 300, octaves: 3 }, envelope: { attack: 0.03, decay: 0.1, sustain: 0.8, release: 0.15 }, volume: -12 }) },
+  violin: { base: 330, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsawtooth', count: 3, spread: 12 }, envelope: { attack: 0.12, decay: 0.1, sustain: 0.9, release: 0.3 }, volume: -16 }), fx: () => [new Tone.Vibrato(5.5, 0.12), new Tone.Filter(3200, 'lowpass')] },
+  synth: { base: 400, make: () => new Tone.MonoSynth({ oscillator: { type: 'square' }, portamento: 0.04, filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.5, baseFrequency: 800, octaves: 2 }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.7, release: 0.1 }, volume: -16 }) },
+  musicbox: { base: 700, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 5, modulationIndex: 4, envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 0.8 }, modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }, volume: -10 }) },
+  steelpan: { base: 400, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 2.5, modulationIndex: 3, envelope: { attack: 0.002, decay: 0.5, sustain: 0.1, release: 0.4 }, modulationEnvelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.2 }, volume: -8 }) },
+};
+
+export const VOICE_GROUPS = { instruments: Object.keys(INSTRUMENTS), voices: Object.keys(ROBOTS) };
+
+// Any voice or instrument by name.
+export function robotVoice(name) {
+  if (INSTRUMENTS[name]) return { instrument: name, basePitch: INSTRUMENTS[name].base };
+  return { robot: name, basePitch: ROBOTS[name].base };
+}
+
+let fx = null;
+const timers = new Set();
+let ambient = true;
+let lastBump = 0;
+
+// Run fn when the audio clock reaches `time` (keeps visuals in sync with sound).
+export function at(time, fn) {
+  const id = setTimeout(() => { timers.delete(id); fn(); }, Math.max(0, (time - Tone.now()) * 1000));
+  timers.add(id);
+}
+
+// Set something up just before it's due, instead of all at once at the start.
+const LOOKAHEAD = 0.25;
+function soon(time, fn) {
+  at(time - LOOKAHEAD, fn);
+}
+
+export function stopAll() {
+  timers.forEach(clearTimeout);
+  timers.clear();
+  fx?.pad.releaseAll();
+  band?.dispose();
+  band = null;
+  currentSong = null;
+}
+
+export async function initAudio() {
+  // Browsers only allow sound after a tap. Don't hang the game waiting on it:
+  // give it a moment, then carry on — sound starts as soon as the browser allows.
+  await Promise.race([Tone.start(), new Promise((resolve) => setTimeout(resolve, 1500))]);
+  if (fx) return;
+
+  const limiter = new Tone.Limiter(-2).toDestination();
+  const reverb = new Tone.Reverb({ decay: 7, wet: 0.5 }).connect(limiter);
+  const delay = new Tone.FeedbackDelay({ delayTime: '8n.', feedback: 0.35, wet: 0.3 }).connect(reverb);
+
+  // Rain: a soft sine "drop" layered with a glassy FM bell.
+  const drop = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.5 },
+    volume: -14,
+  }).connect(delay);
+  const bell = new Tone.PolySynth(Tone.FMSynth, {
+    harmonicity: 3.5,
+    modulationIndex: 8,
+    envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.3 },
+    modulationEnvelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.1 },
+    volume: -26,
+  }).connect(delay);
+
+  const pad = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'fattriangle', count: 3, spread: 20 },
+    envelope: { attack: 2.5, decay: 1, sustain: 0.6, release: 4 },
+    volume: -28,
+  }).connect(reverb);
+
+  // Voice chain: muffle → grit → shimmer → echo/space, plus an octave-up ghost.
+  const voiceOut = new Tone.Gain(0.35).connect(delay);
+  voiceOut.connect(reverb);
+  const chorus = new Tone.Chorus({ frequency: 3, delayTime: 2.5, depth: 0.3, wet: 0.2 }).connect(voiceOut).start();
+  const crusher = new Tone.BitCrusher(6).connect(chorus);
+  crusher.wet.value = 0.2;
+  const muffle = new Tone.Filter(18000, 'lowpass').connect(crusher);
+  const harmony = new Tone.Gain(0.25).connect(muffle);
+  const shifter = new Tone.PitchShift({ pitch: 12, windowSize: 0.05 }).connect(harmony);
+  const voiceIn = new Tone.Gain(1).connect(muffle);
+  voiceIn.connect(shifter);
+  // Recordings are much hotter than the robot voices; this keeps them from burying the drums.
+  const recordedIn = new Tone.Gain(0.4).connect(voiceIn);
+
+  // Each robot voice gets its own vibrato (the little wobble that sounds sung).
+  const robotIn = {};
+  for (const [name, r] of Object.entries(ROBOTS)) {
+    robotIn[name] = r.vibrato[1] > 0
+      ? new Tone.Vibrato(r.vibrato[0], r.vibrato[1]).connect(voiceIn)
+      : new Tone.Gain(1).connect(voiceIn);
+  }
+
+  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, robotIn, muffle, crusher, harmony };
+  newChimes();
+  setKey(DEFAULT_KEY);
+  startAmbience();
+}
+
+// The space is never silent: a slow pad and the odd raindrop, forever.
+function startAmbience() {
+  let chord = 0;
+  const tick = () => {
+    if (ambient) {
+      const t = Tone.now() + 0.1;
+      fx.pad.triggerAttackRelease(chordFor(key, key.progression[chord++ % key.progression.length]), 7, t, 0.35);
+      rain(t, 8, 0.35);
+    }
+  };
+  tick();
+  setInterval(tick, 8000);
+}
+
+// Pause the background bed while the song plays its own chords.
+export function setAmbient(on) {
+  ambient = on;
+}
+
+// The chime family stays the same, but each session gets its own colour:
+// how metallic, how long it rings, which octave, and whether it adds a second note.
+let chime = { octave: 0, interval: 0 };
+export function newChimes() {
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  fx.bell.set({
+    harmonicity: pick([2, 3, 3.5, 4, 5.07, 7]),
+    modulationIndex: 4 + Math.random() * 8,
+    envelope: { decay: 0.1 + Math.random() * 0.3 },
+  });
+  fx.drop.set({ oscillator: { type: pick(['sine', 'triangle', 'sine']) }, envelope: { decay: 0.2 + Math.random() * 0.25 } });
+  chime = { octave: pick([-12, 0, 0, 12]), interval: pick([0, 0, 7, 12, 4]) };
+}
+
+// Two glyphs touched. Soft, and rate-limited so a crowd doesn't get noisy.
+export function bump(seed, strength = 0.5) {
+  const now = Tone.now();
+  if (now - lastBump < 0.15) return;
+  lastBump = now;
+  const note = up(keyRain[hash(String(seed)) % keyRain.length], chime.octave);
+  fx.bell.triggerAttackRelease(note, 0.04, now, 0.15 + strength * 0.35);
+  fx.drop.triggerAttackRelease(note, 0.05, now, 0.08 + strength * 0.2);
+  if (chime.interval) fx.bell.triggerAttackRelease(up(note, chime.interval), 0.04, now + 0.03, 0.1 + strength * 0.2);
+}
+
+// 0 = garbled, 1 = clear. Interludes climb this slowly; the finale is 1.
+export function setClarity(c, seconds = 1) {
+  const glide = (param, value) => {
+    param.cancelAndHoldAtTime(Tone.now()); // stop any fade still in progress first
+    param.rampTo(value, seconds);
+  };
+  glide(fx.muffle.frequency, 350 + c * c * 12000);
+  glide(fx.crusher.wet, 0.03 + (1 - c) * 0.35);
+  glide(fx.harmony.gain, (1 - c) * 0.25); // octave-up ghost only while garbled
+}
+
+export function plink(seed, time = Tone.now(), velocity = 0.8) {
+  const note = keyRain[hash(String(seed)) % keyRain.length];
+  fx.drop.triggerAttackRelease(note, 0.1, time, velocity);
+  fx.bell.triggerAttackRelease(note, 0.05, time + 0.005, velocity * 0.6);
+}
+
+// Let a player hear the clip they just recorded, already through the effects.
+export function previewClip(clip) {
+  playBuffer(clip.buffer, Tone.now() + 0.05, 1);
+}
+
+// Sing a few syllables so a player can hear a voice before choosing it.
+const previewVoices = {};
+export function previewVoice(voice, syllables) {
+  const name = voice.robot || voice.instrument;
+  if (name) voice = previewVoices[name] ||= voice; // reuse, don't build a new one each click
+  setClarity(1, 0.1);
+  const scale = scaleFor(voice.basePitch);
+  let t = Tone.now() + 0.05;
+  syllables.forEach((syl, i) => {
+    sing(voice, syl, t, scale[[2, 3, 4, 3, 1][i % 5]], 0.26);
+    t += 0.28;
+  });
+}
+
+function rain(from, seconds, density = 1.2) {
+  const notes = keyRain;
+  let t = from;
+  while (t < from + seconds) {
+    t += (0.4 + Math.random() * 1.2) / density;
+    fx.drop.triggerAttackRelease(notes[Math.floor(Math.random() * notes.length)], 0.1, t, 0.15 + Math.random() * 0.25);
+  }
+}
+
+// Each player sings on the key's 5 safe notes, near their own pitch ("autotune").
+// Only the 6 notes closest to it: big shifts sound like chipmunks.
+function scaleFor(basePitch = 180, k = key) {
+  const { steps, penta } = MODES[k.mode];
+  const all = [];
+  for (let oct = -3; oct <= 3; oct++) {
+    for (const d of penta) all.push(440 * 2 ** ((60 + k.root + steps[d] + 12 * oct - 69) / 12));
+  }
+  const distance = (f) => Math.abs(Math.log2(f / basePitch));
+  return all.sort((a, b) => distance(a) - distance(b)).slice(0, 6).sort((a, b) => a - b);
+}
+
+function melody(count, scaleLen, seed) {
+  let i = Math.floor(scaleLen / 2);
+  let s = seed;
+  const notes = [];
+  for (let n = 0; n < count; n++) {
+    s = hash(String(s));
+    i = Math.min(scaleLen - 1, Math.max(0, i + (s % 5) - 2));
+    notes.push(i);
+  }
+  if (notes.length > 1) notes[notes.length - 1] = Math.min(1, scaleLen - 1); // settle low at the end
+  return notes;
+}
+
+// loop = [start, end] as fractions of the clip: the part repeated to hold a note.
+function playBuffer(buffer, time, rate, { duration, loop = null } = {}) {
+  const src = new Tone.ToneBufferSource({ url: buffer, playbackRate: rate, fadeIn: 0.012, fadeOut: 0.06 });
+  src.connect(fx.recordedIn);
+  if (loop) {
+    src.loop = true;
+    src.loopStart = buffer.duration * loop[0];
+    src.loopEnd = buffer.duration * loop[1];
+  }
+  src.onended = () => src.dispose();
+  src.start(time);
+  if (duration) src.stop(time + duration);
+  return src;
+}
+
+function singFromBank(bank, syl, time, freq, dur, reverse) {
+  const pick = (clip) => (reverse ? clip.reversed : clip.buffer);
+  // "Autotune": speed each clip up/down just enough to land on the note.
+  // Kept gentle: bigger speed changes make a voice sound less like a person.
+  const rateFor = (clip) => Math.min(1.25, Math.max(0.8, freq / (clip.pitch || bank.basePitch)));
+  const sounds = VOWEL_SOUND[syl.jung] || [syl.jung];
+  const end = time + dur;
+  const bodyEnd = syl.jong ? end - 0.05 : end;
+  let t = time;
+
+  if (syl.cho !== 'ㅇ') {
+    const whole = sounds.length === 1 && findSyllable(bank, syl.cho, sounds[0]);
+    if (whole) {
+      // Best case: a real recorded syllable, its vowel looped to hold the note.
+      const rate = rateFor(whole);
+      const hold = bodyEnd - t;
+      playBuffer(pick(whole), t, rate, {
+        duration: hold,
+        loop: hold > whole.buffer.duration / rate ? [0.55, 0.9] : null,
+      });
+      t = bodyEnd;
+    } else {
+      // Fallback: the consonant's attack, then the vowel on its own.
+      const onset = findOnset(bank, syl.cho);
+      if (onset) {
+        playBuffer(pick(onset.clip), t, rateFor(onset.clip), { duration: onset.length });
+        t += onset.length * 0.8;
+      }
+    }
+  }
+
+  // 중성 (vowel) still to sing: a quick glide for compound vowels, then the main one.
+  if (t < bodyEnd - 0.02) {
+    sounds.forEach((v, i) => {
+      const clip = getClip(bank, v);
+      if (!clip) return;
+      const glide = sounds.length > 1 && i === 0;
+      const start = glide ? t : t + (sounds.length > 1 ? 0.07 : 0);
+      const length = glide ? 0.08 : Math.max(0.08, bodyEnd - start);
+      const rate = rateFor(clip);
+      playBuffer(pick(clip), start, rate, {
+        duration: length,
+        loop: !glide && length > clip.buffer.duration / rate ? [0.1, 0.9] : null,
+      });
+    });
+  }
+
+  // 종성 (final consonant): a short tail.
+  const tail = syl.jong && findOnset(bank, syl.jong);
+  if (tail) playBuffer(pick(tail.clip), end - 0.05, rateFor(tail.clip), { duration: 0.09 });
+}
+
+// Robot voice: a buzzy tone (or breath) shaped by three vowel filters.
+// Each voice is ONE persistent instrument (like a mouth): every syllable just
+// re-shapes it. Building fresh filters per syllable overloaded the audio engine.
+function robotEngine(voice) {
+  if (voice.engine) return voice.engine;
+  const r = ROBOTS[voice.robot] || ROBOTS.velvet;
+  const out = new Tone.Gain(0.5).connect(fx.robotIn[voice.robot] || fx.voiceIn);
+  const env = new Tone.AmplitudeEnvelope({ attack: 0.025, decay: 0.08, sustain: 0.85, release: 0.12 });
+  const filters = [[5, 1], [7, 0.5], [9, 0.25]].map(([Q, level]) => {
+    const filter = new Tone.Filter({ frequency: 500, type: 'bandpass', Q }).connect(new Tone.Gain(level).connect(out));
+    env.connect(filter);
+    return filter;
+  });
+  let osc = null;
+  if (r.osc) {
+    osc = new Tone.OmniOscillator({ frequency: r.base, ...r.osc }).connect(env);
+    osc.start();
+  }
+  if (r.breath > 0) new Tone.Noise('pink').connect(new Tone.Gain(r.breath).connect(env)).start();
+  // Consonants: a short burst of hiss.
+  const hiss = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }).connect(out);
+  new Tone.Noise('white').connect(new Tone.Filter(3000 * r.shift, 'highpass').connect(hiss)).start();
+  voice.engine = { r, env, filters, osc, hiss, last: 0 };
+  return voice.engine;
+}
+
+function singFromRobot(voice, syl, time, freq, dur) {
+  const e = robotEngine(voice);
+  // A new phrase starting before the last one finished (e.g. quick previews): cut it off.
+  if (time < e.last) {
+    e.env.cancel(time);
+    e.hiss.cancel(time);
+    e.filters.forEach((f) => f.frequency.cancelScheduledValues(time));
+    e.osc?.frequency.cancelScheduledValues(time);
+  }
+  const sounds = VOWEL_SOUND[syl.jung] || [syl.jung];
+  const from = FORMANTS[sounds[0]] || FORMANTS['ㅓ'];
+  const to = FORMANTS[sounds[sounds.length - 1]] || FORMANTS['ㅓ'];
+  const start = time + 0.03;
+
+  if (syl.cho !== 'ㅇ') {
+    e.hiss.decay = FRICATIVES.has(syl.cho) ? 0.1 : 0.03;
+    e.hiss.triggerAttack(time, 0.25);
+  }
+  // Glide the vowel shape, the way a mouth moves between sounds.
+  e.filters.forEach((f, i) => {
+    f.frequency.setValueAtTime(from[i] * e.r.shift, start);
+    f.frequency.linearRampToValueAtTime(to[i] * e.r.shift, start + 0.09);
+  });
+  if (e.osc) {
+    // A tiny scoop up into the note, like a singer — or a hard jump, like autotune.
+    e.osc.frequency.setValueAtTime(e.r.scoop ? freq * 0.97 : freq, start);
+    e.osc.frequency.linearRampToValueAtTime(freq, start + 0.05);
+  }
+  e.env.triggerAttackRelease(dur, start);
+  e.last = start + dur + 0.15;
+}
+
+// One persistent instrument per voice, like the robot "mouth".
+function instrumentEngine(voice) {
+  if (voice.engine) return voice.engine;
+  const spec = INSTRUMENTS[voice.instrument];
+  const synth = spec.make();
+  const chain = spec.fx ? spec.fx() : [];
+  synth.chain(...chain, fx.voiceIn);
+  voice.engine = { synth, mono: !(synth instanceof Tone.PolySynth), last: 0 };
+  return voice.engine;
+}
+
+function playInstrument(voice, time, freq, dur) {
+  const e = instrumentEngine(voice);
+  // One-note instruments can't go back in time (e.g. quick previews overlapping).
+  const t = e.mono ? Math.max(time, e.last + 0.01) : time;
+  e.synth.triggerAttackRelease(freq, dur, t, 0.9);
+  e.last = t + dur;
+}
+
+// voice = a recorded bank ({ clips }), a robot ({ robot: 'silk' }) or an instrument ({ instrument: 'guitar' }).
+function sing(voice, syl, time, freq, dur, reverse = false) {
+  if (voice?.clips) singFromBank(voice, syl, time, freq, dur, reverse);
+  else if (voice?.instrument) playInstrument(voice, time, freq, dur);
+  else singFromRobot(voice || robotVoice('velvet'), syl, time, freq, dur);
+}
+
+// Between rounds: the round's syllables, shuffled, reversed, muffled.
+// items = [{ syl, player }]; voices = [p1, p2]. Returns length in seconds.
+export function playInterlude(items, voices, clarity, onSyllable) {
+  setClarity(clarity, 0.5);
+  const t0 = Tone.now() + 0.3;
+  // Every syllable of both messages, in turn. Nearby syllables swap places
+  // (more when it's garbled), but nothing gets cut.
+  const picked = [...items];
+  for (let i = 1; i < picked.length; i++) {
+    if (picked[i].player === picked[i - 1].player && Math.random() > clarity + 0.3) {
+      [picked[i], picked[i - 1]] = [picked[i - 1], picked[i]];
+    }
+  }
+  fx.pad.triggerAttackRelease(chordFor(key, key.progression[Math.floor(Math.random() * 4)]), 5, t0, 0.5);
+
+  let t = t0 + 0.4;
+  picked.forEach((item, n) => {
+    const scale = scaleFor(voices[item.player]?.basePitch);
+    const freq = scale[hash(item.syl.char + n) % scale.length];
+    const dur = 0.17 + Math.random() * 0.12;
+    const when = t;
+    const reverse = Math.random() < (1 - clarity) * 0.6;
+    soon(when, () => sing(voices[item.player], item.syl, when, freq, dur, reverse));
+    at(t, () => onSyllable(item));
+    t += dur + (Math.random() - 0.3) * 0.15 * (1 - clarity);
+  });
+  rain(t0, t - t0 + 1, 1.5);
+  return t - Tone.now() + 0.9;
+}
+
+// ── the finale: a band built from the song DNA ──
+
+const LEADS = {
+  mallet: [Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.25, sustain: 0, release: 0.3 }, volume: -20 }],
+  bells: [Tone.FMSynth, { harmonicity: 3.5, modulationIndex: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.5 }, modulationEnvelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 }, volume: -24 }],
+  kalimba: [Tone.FMSynth, { harmonicity: 8, modulationIndex: 2, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.2 }, modulationEnvelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 }, volume: -20 }],
+  glass: [Tone.Synth, { oscillator: { type: 'sine' }, envelope: { attack: 0.002, decay: 0.6, sustain: 0, release: 0.8 }, volume: -18 }],
+  chip: [Tone.Synth, { oscillator: { type: 'square' }, envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.05 }, volume: -30 }],
+  harp: [Tone.Synth, { oscillator: { type: 'fattriangle', count: 2, spread: 10 }, envelope: { attack: 0.002, decay: 0.8, sustain: 0, release: 0.6 }, volume: -22 }],
+};
+const PADS = {
+  warm: { oscillator: { type: 'fattriangle', count: 3, spread: 20 }, envelope: { attack: 0.8, decay: 0.5, sustain: 0.7, release: 2 }, volume: -29 },
+  strings: { oscillator: { type: 'fatsawtooth', count: 3, spread: 25 }, envelope: { attack: 0.6, decay: 0.5, sustain: 0.8, release: 2 }, volume: -33 },
+  choir: { oscillator: { type: 'fatsine', count: 4, spread: 30 }, envelope: { attack: 1, decay: 0.5, sustain: 0.8, release: 2.5 }, volume: -25 },
+  organ: { oscillator: { type: 'amsine', harmonicity: 2 }, envelope: { attack: 0.3, decay: 0.2, sustain: 0.9, release: 1.5 }, volume: -31 },
+};
+const BASSES = {
+  round: { oscillator: { type: 'triangle' }, filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.4, baseFrequency: 200, octaves: 2 }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.5, release: 0.4 }, volume: -14 },
+  sub: { oscillator: { type: 'sine' }, filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 1, baseFrequency: 300, octaves: 1 }, envelope: { attack: 0.01, decay: 0.4, sustain: 0.7, release: 0.5 }, volume: -11 },
+  buzz: { oscillator: { type: 'sawtooth' }, filterEnvelope: { attack: 0.01, decay: 0.25, sustain: 0.2, baseFrequency: 120, octaves: 3 }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.3 }, volume: -19 },
+  pluck: { oscillator: { type: 'square' }, filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0, baseFrequency: 150, octaves: 3 }, envelope: { attack: 0.005, decay: 0.15, sustain: 0, release: 0.1 }, volume: -20 },
+};
+// Drum kits: kick shape, snare type (noise or metallic click), hat length.
+const KITS = {
+  soft: { kick: [0.03, 5, 0.4, -4], snare: ['pink', 0.2, 1200, -14], hat: [0.03, 8000, -20] },
+  glitch: { kick: [0.01, 4, 0.2, -3], snare: ['metal'], hat: [0.012, 9000, -18] },
+  deep: { kick: [0.12, 8, 1.1, -2], snare: ['white', 0.14, 2400, -13], hat: [0.02, 9000, -20] },
+  tick: { kick: [0.02, 3, 0.18, -5], snare: ['metal'], hat: [0.04, 6000, -21] },
+  pulse: { kick: [0.05, 6, 0.45, -2], snare: ['white', 0.15, 1800, -13], hat: [0.09, 7000, -20] },
+};
+// Beats: which of the 16 steps in a bar each drum plays on.
+const BEATS = {
+  broken: { kick: [0, 6, 8], snare: [4, 12], hat: [2, 6, 10, 14] },
+  four: { kick: [0, 4, 8, 12], snare: [4, 12], hat: [2, 6, 10, 14] },
+  half: { kick: [0, 10], snare: [8], hat: [0, 2, 4, 6, 8, 10, 12, 14] },
+  trap: { kick: [0, 7, 10], snare: [8], hat: [...Array(16).keys()] },
+  shuffle: { kick: [0, 9], snare: [4, 12], hat: [0, 3, 6, 8, 11, 14] },
+  sparse: { kick: [0, 8], snare: [12], hat: [4, 10, 14] },
+};
+// Arpeggio shapes over the 4 chord notes (4 = the root an octave up).
+const ARPS = {
+  up: [0, 1, 2, 3], down: [3, 2, 1, 0], updown: [0, 1, 2, 3, 2, 1],
+  alberti: [0, 2, 1, 2], broken: [0, 2, 1, 3], wide: [0, 4, 1, 3],
+};
+
+const up = (note, semis) => Tone.Frequency(note).transpose(semis).toNote();
+let band = null;
+
+function buildBand(dna) {
+  const nodes = [];
+  const keep = (n) => { nodes.push(n); return n; };
+  const out = keep(new Tone.Gain(1).connect(fx.limiter));
+  // Drums get their own, louder bus so they cut through everything else.
+  const drums = keep(new Tone.Gain(1.6).connect(fx.limiter));
+  const echo = keep(new Tone.FeedbackDelay({ delayTime: dna.delayTime, feedback: dna.delayFeedback, wet: 0.3 }).connect(fx.reverb));
+  const [LeadVoice, leadOptions] = LEADS[dna.lead];
+  const lead = keep(new Tone.PolySynth(LeadVoice, { ...leadOptions, volume: leadOptions.volume - 2 }).connect(echo));
+  // The pad ducks on every kick ("pumping"), which makes the drums feel bigger.
+  const duck = keep(new Tone.Gain(1).connect(keep(new Tone.Filter(dna.pad === 'strings' ? 1600 : 4000, 'lowpass').connect(fx.reverb))));
+  const pad = keep(new Tone.PolySynth(Tone.Synth, PADS[dna.pad]).connect(duck));
+  const bass = keep(new Tone.MonoSynth(BASSES[dna.bass]).connect(out));
+
+  const kit = KITS[dna.kit];
+  const [pitchDecay, octaves, decay, kickVol] = kit.kick;
+  const kick = keep(new Tone.MembraneSynth({
+    pitchDecay, octaves, envelope: { attack: 0.001, decay, sustain: 0, release: 0.01 }, volume: kickVol,
+  }).connect(drums));
+  let snare;
+  if (kit.snare[0] === 'metal') {
+    snare = keep(new Tone.MetalSynth({
+      envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
+      harmonicity: 5.1, modulationIndex: 16, resonance: 3000, octaves: 1.5, volume: -14,
+    }).connect(drums));
+  } else {
+    const [type, snareDecay, freq, vol] = kit.snare;
+    const body = keep(new Tone.Filter(freq, 'bandpass').connect(drums));
+    body.connect(fx.reverb);
+    snare = keep(new Tone.NoiseSynth({
+      noise: { type }, envelope: { attack: 0.001, decay: snareDecay, sustain: 0, release: 0.01 }, volume: vol,
+    }).connect(body));
+  }
+  const [hatDecay, hatFreq, hatVol] = kit.hat;
+  const hat = keep(new Tone.NoiseSynth({
+    noise: { type: 'white' }, envelope: { attack: 0.001, decay: hatDecay, sustain: 0, release: 0.01 }, volume: hatVol,
+  }).connect(keep(new Tone.Filter(hatFreq, 'highpass').connect(drums))));
+  const crashFilter = keep(new Tone.Filter(5000, 'highpass').connect(drums));
+  crashFilter.connect(fx.reverb);
+  const crash = keep(new Tone.NoiseSynth({
+    noise: { type: 'white' }, envelope: { attack: 0.001, decay: 1.4, sustain: 0, release: 0.01 }, volume: -22,
+  }).connect(crashFilter));
+
+  return {
+    lead, pad, bass, hat, crash,
+    kick: (t, beatLen) => {
+      kick.triggerAttackRelease('C1', beatLen / 2, t);
+      duck.gain.setValueAtTime(0.35, t);
+      duck.gain.linearRampToValueAtTime(1, t + beatLen * 0.45);
+    },
+    hitSnare: (t, velocity = 1) => (kit.snare[0] === 'metal'
+      ? snare.triggerAttackRelease(250, 0.05, t, 0.8 * velocity)
+      : snare.triggerAttackRelease(0.1, t, velocity)),
+    dispose: () => nodes.forEach((n) => n.dispose()),
+  };
+}
+
+// The band builds: 0 pad + arpeggio · 1 + bass · 2 + kick & hats · 3 + snare & high pad · 4 everything, busier.
+function playSection(dna, { start, end, chord, level, crash }) {
+  const beatLen = 60 / dna.bpm;
+  const six = beatLen / 4;
+  const length = end - start;
+  const totalSteps = Math.round(length / six);
+  band.pad.triggerAttackRelease(chord, length + 0.3, start, 0.5);
+  if (level >= 3) band.pad.triggerAttackRelease(chord.map((n) => up(n, 12)), length, start, 0.3);
+  if (crash && level >= 3) band.crash.triggerAttackRelease(0.05, start, 0.8);
+  const tones = [...chord.map((n) => up(n, 12)), up(chord[0], 24)];
+  const shape = ARPS[dna.arp];
+  const rate = level >= 4 ? 1 : dna.arpRate;
+  const beat = BEATS[dna.pattern];
+  const root = up(chord[0], -12);
+
+  for (let k = 0; k < totalSteps; k++) {
+    const step = k % 16;
+    const t = start + k * six + (k % 2 ? dna.swing * six : 0); // swing pushes the off-steps late
+    const fill = level >= 3 && totalSteps >= 8 && k >= totalSteps - 4; // snare roll into the next part
+    if (k % rate === 0) band.lead.triggerAttackRelease(tones[shape[(k / rate) % shape.length]], '16n', t, step % 4 === 0 ? 0.45 : 0.25);
+    if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
+    if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
+    if (level >= 2 && beat.hat.includes(step)) band.hat.triggerAttackRelease(0.02, t, 0.7);
+    else if (level >= 4 && step % 2 === 1) band.hat.triggerAttackRelease(0.02, t, 0.3);
+    if (dna.kit === 'glitch' && level >= 2 && step === 15 && (dna.seed + k) % 3 === 0) {
+      band.hat.triggerAttackRelease(0.01, t + six / 2, 0.5); // a little stutter
+    }
+    if (fill) band.hitSnare(t, 0.5 + (k - (totalSteps - 4)) * 0.17);
+    else if (level >= 3 && beat.snare.includes(step)) band.hitSnare(t);
+  }
+}
+
+// ── the looping song ──
+// The finale plays every message in order, then loops forever with the full band
+// (until stopAll). Pass 0 builds up; later passes go big, with a breakdown on odd loops.
+let currentSong = null;
+
+function schedulePass(song, passStart, pass) {
+  const { messages, voices, dna, beatLen, callbacks } = song;
+  const six = beatLen / 4;
+  const onBeat = (t) => passStart + Math.ceil((t - passStart) / beatLen - 1e-6) * beatLen;
+  const last = messages.length - 1;
+  const levelFor = (m) => {
+    if (pass === 0) return m >= last ? 4 : m < 2 ? 2 : 3; // drums from the very first message
+    if (m === 0 && pass % 2 === 1) return 1; // breakdown: drums drop out for a moment…
+    return m >= last - 1 ? 4 : 3; // …then slam back in
+  };
+  let t = passStart;
+
+  messages.forEach((msg, m) => {
+    t = onBeat(t);
+    const voice = voices[msg.player];
+    const scale = scaleFor(voice?.basePitch, dna);
+    const syls = msg.words.flatMap((w, wi) => w.syllables.map((s, si) => ({ s, wi, si })));
+    const notes = melody(syls.length, scale.length, hash(msg.words.map((w) => w.word).join(' ')) ^ dna.seed);
+    const steps = syls.length > 14 ? 1 : 2; // long messages sing in 16ths so they don't drag
+    const msgStart = t;
+    at(t, () => song === currentSong && callbacks.onMessage(m, pass));
+
+    syls.forEach(({ s, wi, si }, n) => {
+      const len = (n === syls.length - 1 ? 4 : steps) * six;
+      const when = t;
+      const freq = scale[notes[n]];
+      soon(when, () => sing(voice, s, when, freq, len * 0.95));
+      at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
+      t += len;
+    });
+    const section = {
+      start: msgStart, end: onBeat(t), chord: chordFor(dna, dna.progression[m % dna.progression.length]),
+      level: levelFor(m), crash: m === 0 || m === last - 1,
+    };
+    soon(section.start, () => playSection(dna, section));
+  });
+
+  // One bar back home on the first chord, then go round again.
+  const turnaround = onBeat(t);
+  const passEnd = turnaround + beatLen * 4;
+  soon(turnaround, () => playSection(dna, { start: turnaround, end: passEnd, chord: chordFor(dna, 0), level: 4 }));
+  soon(passEnd, () => { if (song === currentSong) schedulePass(song, passEnd, pass + 1); });
+  rain(passStart, passEnd - passStart, dna.rain);
+  return passEnd;
+}
+
+// Start the song. Returns timing so the visuals can dance on the beat.
+export function playFinale(messages, voices, dna, callbacks) {
+  stopAll();
+  setKey(dna);
+  setClarity(1, 1);
+  band = buildBand(dna);
+  const beatLen = 60 / dna.bpm;
+  const songStart = Tone.now() + 0.3;
+  const song = { messages, voices, dna, beatLen, callbacks };
+  currentSong = song;
+  // A two-beat count-in with the drums already going.
+  const intro = { start: songStart, end: songStart + beatLen * 2, chord: chordFor(dna, 0), level: 2 };
+  soon(intro.start, () => playSection(dna, intro));
+  const firstPassEnd = schedulePass(song, intro.end, 0);
+  return { songStart, beat: beatLen, firstPass: firstPassEnd - Tone.now() };
+}

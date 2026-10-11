@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Word Log</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap">
+  <style>
+    :root { --bg: #05060a; --ink: #e6e9f2; --dim: #7b8194; --line: rgba(230, 233, 242, 0.18); --gold: #ffd27a; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 "JetBrains Mono", ui-monospace, monospace; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-weight: 400; letter-spacing: 0.2em; font-size: 20px; margin: 0 0 4px; }
+    p { color: var(--dim); margin: 4px 0 20px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tabs button { font: inherit; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+    .tabs button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+    th { color: var(--dim); font-weight: 400; }
+    td.n { text-align: right; width: 4em; color: var(--dim); }
+    td.bar { width: 40%; }
+    .bar span { display: block; height: 6px; border-radius: 3px; background: var(--gold); opacity: 0.7; }
+    .has { color: #96dcff; }
+    .need { color: var(--gold); }
+    #msg { color: var(--dim); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>word log</h1>
+    <p>The most-used words across every duet (filler like "the" and "lol" is skipped; one-off words are hidden).
+      Gold = no picture yet — that's the list of pictures to draw next.</p>
+    <div class="tabs">
+      <button data-show="need" class="on">needs a picture</button>
+      <button data-show="all">all words</button>
+      <button data-show="has">has a picture</button>
+    </div>
+    <p id="msg">loading…</p>
+    <table hidden>
+      <thead><tr><th>word</th><th></th><th>picture</th><th class="n">said</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script type="module">
+    import { PICTURE_WORDS } from './js/pictures.js';
+
+    // word → the picture it already triggers (if any)
+    const pictureFor = {};
+    for (const [picture, words] of Object.entries(PICTURE_WORDS)) for (const w of words) pictureFor[w] = picture;
+
+    const key = new URLSearchParams(location.search).get('key') || '';
+    let rows = [];
+    let showing = 'need';
+
+    function render() {
+      const list = rows.filter((r) => showing === 'all' || (showing === 'has') === Boolean(pictureFor[r.word]));
+      const max = Math.max(1, ...rows.map((r) => r.count));
+      document.querySelector('tbody').innerHTML = list.map((r) => {
+        const pic = pictureFor[r.word];
+        return `<tr><td class="${pic ? 'has' : 'need'}">${r.word}</td>
+          <td class="bar"><span style="width:${(r.count / max) * 100}%"></span></td>
+          <td>${pic || '—'}</td><td class="n">${r.count}</td></tr>`;
+      }).join('');
+      document.querySelector('table').hidden = list.length === 0;
+      document.getElementById('msg').textContent = list.length ? '' : 'nothing here yet — go play some duets';
+    }
+
+    document.querySelector('.tabs').addEventListener('click', (e) => {
+      if (!e.target.dataset.show) return;
+      showing = e.target.dataset.show;
+      document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b === e.target));
+      render();
+    });
+
+    const res = await fetch(`/api/words?key=${encodeURIComponent(key)}`);
+    if (!res.ok) {
+      document.getElementById('msg').textContent = 'locked — open this page with ?key=YOUR_KEY';
+    } else {
+      rows = await res.json();
+      render();
+    }
+  </script>
+</body>
+</html>

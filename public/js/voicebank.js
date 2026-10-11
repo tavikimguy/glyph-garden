@@ -1,27 +1,35 @@
 // Voice bank: record ~20 short sounds per player, trim them, find their pitch.
+// (Keys are Korean jamo internally: it's a tidy set of sounds to stitch words from.)
 // Later the singer stitches these clips into any word — your voice, rebuilt.
 
+const VOWEL_PROMPTS = [
+  { key: 'ㅏ', say: 'ah', hint: 'as in "father" — hold it on one steady note', type: 'vowel' },
+  { key: 'ㅓ', say: 'uh', hint: 'as in "cup" — hold it', type: 'vowel' },
+  { key: 'ㅗ', say: 'oh', hint: 'as in "go" — hold it', type: 'vowel' },
+  { key: 'ㅜ', say: 'oo', hint: 'as in "moon" — hold it', type: 'vowel' },
+  { key: 'ㅡ', say: 'eu', hint: 'like "uh" with a flat smile — hold it', type: 'vowel' },
+  { key: 'ㅣ', say: 'ee', hint: 'as in "see" — hold it', type: 'vowel' },
+  { key: 'ㅔ', say: 'eh', hint: 'as in "bed" — hold it', type: 'vowel' },
+];
+
+// Whole syllables: each consonant with ah / ee / uh. Keeping the consonant and
+// vowel in one recording keeps the natural glide between them — that's what
+// makes it sound like a person instead of glued-together pieces.
+const CONSONANTS = [
+  ['ㄱ', 'g'], ['ㄴ', 'n'], ['ㄷ', 'd'], ['ㄹ', 'l'], ['ㅁ', 'm'], ['ㅂ', 'b'], ['ㅅ', 's'],
+  ['ㅈ', 'j'], ['ㅊ', 'ch'], ['ㅋ', 'k'], ['ㅌ', 't'], ['ㅍ', 'p'], ['ㅎ', 'h'],
+];
+const SYLLABLE_VOWELS = [['ㅏ', 'ah'], ['ㅣ', 'ee'], ['ㅓ', 'uh']];
+
 export const PROMPTS = [
-  { key: 'ㅏ', say: '아', hint: 'ah — hold it', type: 'vowel' },
-  { key: 'ㅓ', say: '어', hint: 'uh — hold it', type: 'vowel' },
-  { key: 'ㅗ', say: '오', hint: 'oh — hold it', type: 'vowel' },
-  { key: 'ㅜ', say: '우', hint: 'oo — hold it', type: 'vowel' },
-  { key: 'ㅡ', say: '으', hint: 'eu — hold it', type: 'vowel' },
-  { key: 'ㅣ', say: '이', hint: 'ee — hold it', type: 'vowel' },
-  { key: 'ㅔ', say: '에', hint: 'eh — hold it', type: 'vowel' },
-  { key: 'ㄱ', say: '그', hint: 'short', type: 'consonant' },
-  { key: 'ㄴ', say: '느', hint: 'short', type: 'consonant' },
-  { key: 'ㄷ', say: '드', hint: 'short', type: 'consonant' },
-  { key: 'ㄹ', say: '르', hint: 'short', type: 'consonant' },
-  { key: 'ㅁ', say: '므', hint: 'short', type: 'consonant' },
-  { key: 'ㅂ', say: '브', hint: 'short', type: 'consonant' },
-  { key: 'ㅅ', say: '스', hint: 'short', type: 'consonant' },
-  { key: 'ㅈ', say: '즈', hint: 'short', type: 'consonant' },
-  { key: 'ㅊ', say: '츠', hint: 'short', type: 'consonant' },
-  { key: 'ㅋ', say: '크', hint: 'short', type: 'consonant' },
-  { key: 'ㅌ', say: '트', hint: 'short', type: 'consonant' },
-  { key: 'ㅍ', say: '프', hint: 'short', type: 'consonant' },
-  { key: 'ㅎ', say: '흐', hint: 'short', type: 'consonant' },
+  ...VOWEL_PROMPTS,
+  ...CONSONANTS.flatMap(([c, roman]) =>
+    SYLLABLE_VOWELS.map(([v, sound]) => ({
+      key: c + v,
+      say: roman + sound,
+      hint: 'once, short and natural — same note as before',
+      type: 'syllable',
+    }))),
 ];
 
 // If a sound is missing, guess with a neighbour (lost in translation, on purpose).
@@ -39,6 +47,30 @@ export function getClip(bank, key) {
   if (!bank) return null;
   if (bank.clips[key]) return bank.clips[key];
   for (const alt of NEAR[key] || []) if (bank.clips[alt]) return bank.clips[alt];
+  return null;
+}
+
+// Best recorded whole syllable for consonant + vowel: exact, then a near vowel,
+// then a near consonant. null means "stitch it from pieces instead".
+export function findSyllable(bank, cho, vowel) {
+  if (!bank) return null;
+  for (const c of [cho, ...(NEAR[cho] || [])]) {
+    for (const v of [vowel, (NEAR[vowel] || [])[0]]) {
+      if (v && bank.clips[c + v]) return bank.clips[c + v];
+    }
+  }
+  return null;
+}
+
+// Just the consonant attack ("g" of "gah"), cut from any syllable starting with it.
+export function findOnset(bank, cho) {
+  if (!bank) return null;
+  for (const c of [cho, ...(NEAR[cho] || [])]) {
+    for (const v of ['ㅓ', 'ㅏ', 'ㅣ']) {
+      const clip = bank.clips[c + v];
+      if (clip) return { clip, length: FRICATIVES.has(c) ? 0.14 : 0.09 };
+    }
+  }
   return null;
 }
 
@@ -143,16 +175,19 @@ export function processClip(audioBuffer, prompt) {
     from = start + Math.floor(len * 0.15);
     to = end - Math.floor(len * 0.15);
   } else {
-    // Keep just the attack: the "g" of 그, the "s" of 스.
+    // Keep the whole syllable, from just before the consonant to the vowel's end.
     from = Math.max(0, start - Math.floor(sr * 0.01));
-    to = Math.min(end, start + Math.floor(sr * (FRICATIVES.has(prompt.key) ? 0.16 : 0.11)));
+    to = Math.min(end, start + Math.floor(sr * 0.8));
   }
 
   const buffer = copySegment(samples, from, to, sr);
+  const data = buffer.getChannelData(0);
+  // Pitch comes from the vowel: the whole clip, or a syllable's back half.
+  const voiced = prompt.type === 'vowel' ? data : data.subarray(Math.floor(data.length * 0.45));
   return {
     buffer,
     reversed: reverseBuffer(buffer),
-    pitch: prompt.type === 'vowel' ? detectPitch(buffer.getChannelData(0), sr) : null,
+    pitch: detectPitch(voiced, sr),
   };
 }
 

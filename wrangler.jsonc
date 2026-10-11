@@ -1,0 +1,22 @@
+{
+  // Cloudflare config: one Worker serves the game files (public/) and runs the duet rooms.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "glyph-garden",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "Room" },
+      { "name": "WORDS", "class_name": "WordLog" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["WordLog"] }
+  ]
+}

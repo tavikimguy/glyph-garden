@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#05060a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Glyph Garden</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.11.13/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <p id="status" hidden></p>
+  <p id="prompt" hidden></p>
+  <div id="key" hidden aria-label="letters you've learned"></div>
+
+  <section id="title" class="panel">
+    <h1>Glyph Garden</h1>
+    <p class="mode">duet</p>
+    <p>Two people write to each other. The words get lost in translation — into drifting glyphs,
+      into strange half-heard sounds — until, at the end, they come back as a song.</p>
+    <button id="host">start a duet</button>
+    <form id="join-form" class="row join">
+      <input id="join-code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="code" aria-label="room code">
+      <button id="join" type="submit">join</button>
+    </form>
+    <button id="local" class="quiet">play on one screen</button>
+    <p class="credit">after <em>“Nuance” Glyph Duet</em> by Iver Kim &amp; Eunsong Shin</p>
+    <p class="credit">we count popular words (never whole messages) to choose new pictures to draw</p>
+  </section>
+
+  <section id="lobby" class="panel" hidden>
+    <p class="mode">duet</p>
+    <div id="lobby-code"></div>
+    <div class="row">
+      <button id="share">share link</button>
+    </div>
+    <p id="lobby-status" class="quiet-text"></p>
+    <div class="picker">
+      <span id="me-label">you</span>
+      <select id="my-voice" aria-label="your instrument or voice"></select>
+      <div id="my-colors" class="swatches"></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="prompts-online"> shared prompts <span id="prompts-note" class="quiet-text"></span></label>
+    <button id="enter">enter the garden</button>
+  </section>
+
+  <section id="local-setup" class="panel" hidden>
+    <p class="mode">duet · one screen</p>
+    <div class="pickers">
+      <div class="picker">
+        <span id="player-0">player 1</span>
+        <select id="voice-0" aria-label="player 1 instrument or voice"></select>
+        <div id="colors-0" class="swatches"></div>
+      </div>
+      <div class="picker">
+        <span id="player-1">player 2</span>
+        <select id="voice-1" aria-label="player 2 instrument or voice"></select>
+        <div id="colors-1" class="swatches"></div>
+      </div>
+      <p class="quiet-text">pick one to hear it</p>
+    </div>
+    <label class="toggle"><input type="checkbox" id="prompts-local"> shared prompts</label>
+    <button id="robots">begin</button>
+    <button id="begin" class="quiet">record your own voices instead</button>
+  </section>
+
+  <section id="bank" class="panel" hidden>
+    <h2 id="bank-who"></h2>
+    <div id="bank-say"></div>
+    <p id="bank-hint"></p>
+    <button id="record" aria-label="hold to record">● hold to record</button>
+    <p id="bank-status"></p>
+    <p id="bank-progress" class="quiet-text"></p>
+    <div class="row">
+      <button id="redo" class="quiet">← redo last</button>
+      <button id="finish-early" class="quiet">finish early — use what I've got</button>
+      <button id="skip-bank" class="quiet">skip — robot voice</button>
+    </div>
+  </section>
+
+  <section id="write" class="panel bottom" hidden>
+    <h2 id="write-who"></h2>
+    <form id="write-form" class="compose">
+      <button id="mic" type="button" class="round" aria-label="speak your message" hidden>●</button>
+      <input id="message" maxlength="80" autocomplete="off" spellcheck="false" enterkeyhint="send" placeholder="write a message…">
+      <button id="send" type="submit" class="round" aria-label="send">↑</button>
+    </form>
+    <p class="quiet-text"><span id="write-hint">enter to send</span> · <span id="write-count"></span></p>
+  </section>
+
+  <section id="waiting" class="panel bottom" hidden>
+    <h2 id="waiting-who">their turn</h2>
+    <p id="waiting-note" class="quiet-text"></p>
+  </section>
+
+  <section id="end" class="panel bottom encore" hidden>
+    <p id="end-recipe" class="quiet-text"></p>
+    <p id="end-secrets" class="secret"></p>
+    <details>
+      <summary class="quiet-text">lyrics</summary>
+      <ol id="end-lyrics"></ol>
+    </details>
+    <div class="row">
+      <button id="replay">stop</button>
+      <button id="save" class="quiet">save image</button>
+      <button id="again" class="quiet">new duet</button>
+    </div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
