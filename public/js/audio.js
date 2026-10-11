@@ -678,6 +678,30 @@ function makeSnareAndHat(kit, drums, keep, quieter = 0) {
 
 // The band builds: 0 pad + arpeggio · 1 + bass · 2 + kick & hats · 3 + snare & high pad · 4 everything, busier.
 // feature = someone's line is playing: the band's lead steps back to leave them room.
+// Jam basslines, one per song. Letters are chord tones: R root, T third, F fifth,
+// S seventh, O the root an octave up. Each always comes home to the root on beat 1.
+const BASSLINES = {
+  walk: { 0: 'R', 3: 'R', 6: 'F', 8: 'R', 10: 'O', 11: 'F', 14: 'F' },
+  pulse: { 0: 'R', 2: 'R', 4: 'R', 6: 'R', 8: 'R', 10: 'R', 12: 'F', 14: 'F' },
+  disco: { 0: 'R', 2: 'O', 4: 'R', 6: 'O', 8: 'R', 10: 'O', 12: 'R', 14: 'O' },
+  offbeat: { 2: 'R', 6: 'R', 10: 'R', 14: 'F' },
+  dub: { 0: 'R', 7: 'F', 10: 'R' },
+  funk: { 0: 'R', 3: 'O', 6: 'R', 7: 'S', 10: 'R', 13: 'T', 14: 'F' },
+};
+export const BASSLINE_NAMES = Object.keys(BASSLINES);
+
+function bassline(dna, chord) {
+  const shape = BASSLINES[dna.bassline] || BASSLINES[BASSLINE_NAMES[dna.seed % BASSLINE_NAMES.length]];
+  const tone = { R: up(chord[0], -12), T: up(chord[1], -12), F: up(chord[2], -12), S: up(chord[3], -12), O: chord[0] };
+  const steps = Object.keys(shape).map(Number);
+  const line = {};
+  steps.forEach((step, i) => {
+    const next = steps[i + 1] ?? 16;
+    line[step] = { note: tone[shape[step]], len: Math.min(next - step, 4) }; // ring until the next note
+  });
+  return line;
+}
+
 // groove (jam): a steady full kit and a walking bassline under everything, no snare rolls.
 function playSection(dna, { start, end, chord, level, crash, feature = false, groove = false }) {
   const beatLen = 60 / dna.bpm;
@@ -693,8 +717,8 @@ function playSection(dna, { start, end, chord, level, crash, feature = false, gr
   const rate = level >= 4 ? 1 : dna.arpRate;
   const beat = BEATS[dna.pattern];
   const root = up(chord[0], -12);
-  // the jam's bassline: root, root, fifth, root, octave, fifth, fifth: it walks, but always lands home
-  const line = groove ? { 0: root, 3: root, 6: up(chord[2], -12), 8: root, 10: chord[0], 11: up(chord[2], -12), 14: up(chord[2], -12) } : null;
+  // the jam's bassline: one of several styles, picked by the song (so every jam grooves differently)
+  const line = groove ? bassline(dna, chord) : null;
 
   for (let k = 0; k < totalSteps; k++) {
     const step = k % 16;
@@ -707,7 +731,7 @@ function playSection(dna, { start, end, chord, level, crash, feature = false, gr
     }
     // the stacked second lead answers on the in-between steps, an octave up, going the other way
     if (band.lead2 && !feature && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
-    if (line) { if (line[step]) band.bass.triggerAttackRelease(line[step], step === 0 ? six * 2.6 : six * 1.6, t, 0.9); }
+    if (line) { if (line[step]) band.bass.triggerAttackRelease(line[step].note, line[step].len * six * 0.9, t, 0.9); }
     else if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
     if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
     if (level >= 2 && beat.hat.includes(step)) band.hat.triggerAttackRelease(0.02, t, 0.7);

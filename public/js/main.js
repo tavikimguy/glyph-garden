@@ -1425,7 +1425,8 @@ $('my-colors').addEventListener('click', (e) => {
 
 // The jam's song recipe, the same on the screen and every phone: from the room's seed + everyone's glyphs.
 function jamDNA(room) {
-  const texts = [String(room.seed), ...room.players.filter(Boolean).map((p) => (p.glyphs || []).join(''))];
+  // the symbols and everyone's words: secret words (cat, rain…) stack their sounds, like in the finale
+  const texts = [String(room.seed), ...room.players.filter(Boolean).map((p) => [(p.glyphs || []).join(''), ...(p.words || [])].join(' '))];
   return songDNA(texts.map((text) => ({ text })));
 }
 
@@ -1557,7 +1558,8 @@ function showJamEnd() {
   $('replay').textContent = 'stop';
   const d = state.dna;
   $('end-recipe').textContent = `${d.keyName} · ${d.feel}  ·  ${d.bpm} bpm  ·  ${state.jamTaps.length} taps`;
-  $('end-secrets').textContent = '';
+  const secrets = d.secrets.length;
+  $('end-secrets').textContent = secrets ? `✶ you found ${secrets} secret word${secrets > 1 ? 's' : ''}` : '';
   // the lyrics: each person's glyphs and the words they gave them
   const room = state.online.room;
   const lines = room.players.map((p, i) => (p?.glyphs && p.words?.some(Boolean)
