@@ -125,6 +125,26 @@ const DRAWINGS = {
     arc(0, -0.45, 0.95, 0.75, Math.PI * 0.2, Math.PI * 0.8, 20),
     arc(0, 0, 0.22, 0.22, 0, TAU, 16),
   ]),
+  frog: shape([
+    arc(0, 0.2, 0.78, 0.5),
+    arc(-0.38, -0.32, 0.22, 0.22), arc(0.38, -0.32, 0.22, 0.22),
+    arc(-0.38, -0.32, 0.07, 0.07, 0, TAU, 8), arc(0.38, -0.32, 0.07, 0.07, 0, TAU, 8),
+    arc(0, 0.22, 0.42, 0.2, Math.PI * 0.15, Math.PI * 0.85, 16),
+  ]),
+  cloud: shape([
+    [[-0.8, 0.25], [0.8, 0.25]],
+    arc(-0.5, 0.25, 0.3, 0.32, Math.PI, Math.PI * 2, 14),
+    arc(0, 0.1, 0.42, 0.5, Math.PI, Math.PI * 2, 18),
+    arc(0.5, 0.25, 0.3, 0.32, Math.PI, Math.PI * 2, 14),
+  ]),
+  rain: shape([
+    [[-0.6, -0.25], [0.6, -0.25]],
+    arc(-0.35, -0.25, 0.25, 0.25, Math.PI, Math.PI * 2, 12),
+    arc(0.05, -0.38, 0.33, 0.38, Math.PI, Math.PI * 2, 14),
+    arc(0.4, -0.25, 0.2, 0.22, Math.PI, Math.PI * 2, 10),
+    ...[-0.5, -0.25, 0, 0.25, 0.5].map((x, i) => [[x, -0.05 + (i % 2) * 0.12], [x - 0.08, 0.3 + (i % 2) * 0.12]]),
+    ...[-0.38, -0.12, 0.12, 0.38].map((x, i) => [[x, 0.45 + (i % 2) * 0.1], [x - 0.08, 0.8 + (i % 2) * 0.1]]),
+  ]),
   tree: shape([
     [[-0.08, 0.95], [-0.08, 0.45], [0.08, 0.45], [0.08, 0.95]],
     [[-0.7, 0.45], [0, -0.05], [0.7, 0.45], [-0.7, 0.45]],
@@ -170,6 +190,9 @@ const MOTION = {
     return [x + (inIris ? Math.sin(t * 0.9) * 0.35 : 0), y * blink];
   },
   tree: (x, y, t) => [x + Math.sin(t * 1.3) * 0.08 * Math.max(0, 0.5 - y), y],
+  frog: (x, y, t) => [x, y - Math.abs(Math.sin(t * 2.5)) * 0.3], // hop hop
+  cloud: (x, y, t) => [x + Math.sin(t * 0.4) * 0.3, y + Math.sin(t * 0.9) * 0.04],
+  rain: (x, y, t) => (y > -0.1 ? [x, -0.1 + ((y + 0.1 + t * 0.6) % 1)] : [x + Math.sin(t * 0.5) * 0.05, y]), // drops fall and loop
 };
 
 // A picture only appears once one of its words has been said in the conversation.
@@ -187,6 +210,9 @@ export const PICTURE_WORDS = {
   eye: ['eye', 'eyes', 'see', 'look', 'looking', 'watch'],
   tree: ['tree', 'trees', 'forest', 'woods'],
   heart: ['love', 'heart', 'loving', 'lovely'],
+  frog: ['frog', 'frogs', 'toad', 'ribbit'],
+  cloud: ['cloud', 'clouds', 'cloudy'],
+  rain: ['rain', 'rainy', 'raining', 'storm'],
 };
 
 export const PICTURES = Object.fromEntries(Object.keys(DRAWINGS).map((name) => [name, {

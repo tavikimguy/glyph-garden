@@ -302,11 +302,16 @@ function afterSend() {
   const seconds = playInterlude(items, state.banks, (round / PER_PLAYER) * 0.7, (item) => {
     item.glyphs.forEach((g) => { g.flash = 1; });
   });
-  // A pattern first, then (if someone said cat, moon, love…) it turns into that picture halfway.
-  const pattern = danceFor('pattern', round - 1);
-  const picture = danceFor('picture', round - 1);
-  startFormation(pattern, `interlude${round}a`);
-  setTimeout(() => { if (state.phase === 'interlude') startFormation(picture, `interlude${round}b`); }, (seconds * 1000) * 0.45);
+  // A pattern first, then every picture earned this round (both people's words,
+  // several in one sentence…), one after another. No new picture words? A second dance.
+  const before = earnedPictures(state.messages.slice(0, n - 2));
+  const fresh = earnedPictures().filter((name) => !before.includes(name));
+  const next = fresh.length ? fresh : [danceFor('picture', round - 1)];
+  startFormation(danceFor('pattern', round - 1), `interlude${round}a`);
+  const share = 0.65 / next.length;
+  next.forEach((name, i) => {
+    setTimeout(() => { if (state.phase === 'interlude') startFormation(name, `interlude${round}-${i}`); }, seconds * 1000 * (0.3 + i * share));
+  });
   setTimeout(() => {
     endFormation();
     startWriting();
@@ -551,9 +556,9 @@ function danceFor(kind, slot) {
 }
 
 // Pictures someone has "earned" by saying their word (cat, moon, love…), in the order first said.
-function earnedPictures() {
+function earnedPictures(messages = state.messages) {
   const earned = [];
-  for (const m of state.messages) {
+  for (const m of messages) {
     for (const word of m.text.toLowerCase().match(/[a-z']+/g) || []) {
       const name = Object.keys(PICTURE_WORDS).find((pic) => PICTURE_WORDS[pic].includes(word));
       if (name && !earned.includes(name)) earned.push(name);

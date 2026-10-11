@@ -7,6 +7,10 @@
 //   secret words    → hidden twists (and the end screen counts how many you found)
 
 import { hash } from './glyphs.js';
+import { PICTURE_WORDS } from './pictures.js';
+
+// Every picture's words are secret words too (they draw something in the dance).
+const PICTURE_WORD_SET = new Set(Object.values(PICTURE_WORDS).flat());
 
 // Scales as semitone steps. `penta` = the 5 safest notes for singing.
 export const MODES = {
@@ -166,10 +170,8 @@ export function songDNA(messages) {
   // Secret words, in the order they were said, each once — and they stack.
   const claimed = new Set();
   for (const w of new Set(words)) {
-    if (SECRETS[w]) {
-      applySecret(d, SECRETS[w], claimed);
-      d.secrets.push(w);
-    }
+    if (SECRETS[w]) applySecret(d, SECRETS[w], claimed);
+    if (SECRETS[w] || PICTURE_WORD_SET.has(w)) d.secrets.push(w);
   }
 
   // Mood → mode, from brightest to darkest.
