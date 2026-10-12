@@ -459,7 +459,7 @@ function startFinale() {
     g.decodeAt = null;
   }
   startFormation(danceFor('pattern', 3), 'finale');
-  state.dna = songDNA(state.messages, { style: state.styleOverride }); // (the override is only the sound preview's)
+  state.dna = songDNA(state.messages, { style: state.styleOverride, shift: state.songShift }); // (overrides: the dev previews only)
   const song = playFinale(state.messages, state.banks, state.dna, {
     onMessage(m, pass) {
       if (state.focus >= 0) decode(state.focus, Infinity);
@@ -1282,12 +1282,16 @@ function openFilm() {
   panel.innerHTML = `<p class="quiet-text">promo recording · portrait 1080×1920 · only the garden and its sound are recorded · keep this tab visible</p>
     <div><select id="film-script">${Object.keys(FILM_SCRIPTS).map((k) => `<option>${k}</option>`).join('')}</select>
     <select id="film-style"><option value="">style: auto</option>${Object.keys(STYLES).map((k) => `<option>${k}</option>`).join('')}</select>
+    <label class="quiet-text">song # <input id="film-song" class="field" type="number" min="0" value="1" style="width:4.5em;padding:4px 8px"></label>
     <label class="quiet-text">dances # <input id="film-seed" class="field" type="number" min="1" value="1" style="width:4.5em;padding:4px 8px"></label>
     <button id="film-preview" class="quiet">▶ preview</button> <button id="film-go">● record</button></div>
-    <p class="quiet-text">dances # picks the finale's pattern dances (picture words stay); it doesn't change the song</p>
+    <p class="quiet-text">song # re-rolls the music for the same words (0 = the original) · dances # picks the finale's pattern dances (picture words stay)</p>
     <p id="film-note" class="quiet-text"></p>`;
   document.body.append(panel);
-  const go = (record) => startFilm($('film-script').value, $('film-style').value, Number($('film-seed').value) || 1, record);
+  const go = (record) => {
+    state.songShift = Number($('film-song').value) || 0;
+    startFilm($('film-script').value, $('film-style').value, Number($('film-seed').value) || 1, record);
+  };
   $('film-go').addEventListener('click', () => go(true));
   $('film-preview').addEventListener('click', () => go(false));
 }

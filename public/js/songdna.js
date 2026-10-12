@@ -203,12 +203,14 @@ function rng(seed) {
   };
 }
 
-// options.style forces a style (the sound preview); options.jam leaves out waltz time
+// options.style forces a style (the sound preview); options.shift re-rolls every choice for the
+// same words (the promo recorder's "song #"; 0 = the normal song); options.jam leaves out waltz time
 // (a jam's loops are built on 4-beat bars).
 export function songDNA(messages, options = {}) {
   const text = messages.map((m) => m.text).join(' / ');
   const words = text.toLowerCase().match(/[a-z']+/g) || [];
-  const rand = rng(hash(text));
+  const seed = (hash(text) + (options.shift || 0) * 104729) >>> 0;
+  const rand = rng(seed);
   const choose = (list) => list[Math.floor(rand() * list.length)];
 
   let mood = 0;
@@ -236,7 +238,7 @@ export function songDNA(messages, options = {}) {
   const within = (list, all) => choose(list || all);
 
   const d = {
-    seed: hash(text),
+    seed,
     style: styleName,
     root: Math.floor(rand() * 12),
     progression: choose(PROGRESSIONS),
