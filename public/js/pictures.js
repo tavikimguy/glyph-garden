@@ -210,26 +210,26 @@ const DRAWINGS = {
     line([-0.78, -0.62], [0.78, -0.62]), line([-0.72, -0.72], [0.72, -0.72]),
     arc(-0.25, -0.25, 0.12, 0.12, 0, TAU, 10), arc(0.22, -0.3, 0.12, 0.12, 0, TAU, 10), arc(0, 0.25, 0.11, 0.11, 0, TAU, 10),
   ], [C.yellow, C.brown, C.brown, C.red, C.red, C.red]),
-  taco: shape([
+  taco: shape([...[
     tilt(arc(0, -0.1, 0.82, 0.78, 0, Math.PI, 26), -0.3), // the folded shell, like the emoji
     tilt(arc(0, -0.1, 0.62, 0.55, Math.PI * 0.12, Math.PI * 0.88, 18), -0.3), // its inside edge
     tilt(Array.from({ length: 19 }, (_, k) => [-0.82 + k * 0.091, -0.16 - Math.abs(Math.sin(k * 1.4)) * 0.2]), -0.3), // lettuce
     tilt(Array.from({ length: 13 }, (_, k) => [-0.6 + k * 0.1, -0.05 - (k % 2) * 0.06]), -0.3), // meat
     ...[[-0.45, -0.2], [-0.05, -0.28], [0.35, -0.22]].map(([x, y]) => tilt(arc(x, y, 0.08, 0.08, 0, TAU, 8), -0.3)), // tomato
     ...[[-0.25, -0.12], [0.15, -0.14], [0.5, -0.1]].map(([x, y]) => tilt([[x, y], [x + 0.08, y + 0.06]], -0.3)), // cheese
-  ], [C.yellow, C.amber, C.green, C.meat, C.red, C.red, C.red, C.yellow, C.yellow, C.yellow]),
+  ].map((stroke) => stroke.map(([x, y]) => [x, -y - 0.2]))], [C.yellow, C.amber, C.green, C.meat, C.red, C.red, C.red, C.yellow, C.yellow, C.yellow]),
   football: shape([
     (() => { // a football: two arcs that meet in points
-      const r = Math.hypot(0.92, 0.95);
-      const from = Math.atan2(-0.95, -0.92);
-      const to = Math.atan2(-0.95, 0.92);
-      const top = arc(0, 0.95, r, r, from, to, 22);
-      const bottom = arc(0, -0.95, r, r, -to, -from, 22);
+      const r = Math.hypot(0.92, 0.55);
+      const from = Math.atan2(-0.55, -0.92);
+      const to = Math.atan2(-0.55, 0.92);
+      const top = arc(0, 0.55, r, r, from, to, 22);
+      const bottom = arc(0, -0.55, r, r, -to, -from, 22);
       return [...top, ...bottom];
     })(),
     line([-0.3, 0], [0.3, 0]),
     ...[-0.22, -0.11, 0, 0.11, 0.22].map((x) => line([x, -0.08], [x, 0.08])),
-    line([-0.62, -0.2], [-0.56, 0.2]), line([0.62, -0.2], [0.56, 0.2]),
+    line([-0.6, -0.3], [-0.54, 0.3]), line([0.6, -0.3], [0.54, 0.3]),
   ], [C.brown, C.white, C.white, C.white, C.white, C.white, C.white, C.white, C.white]),
   baseball: shape([
     arc(0, 0, 0.72, 0.72),
@@ -262,19 +262,18 @@ const DRAWINGS = {
     line([0.7, -0.3], [0.75, -0.15], [0.7, -0.08], [0.65, -0.15], [0.7, -0.3]),
   ], [C.orange, C.ink, C.ink, C.ink, C.orange, C.cream, C.orange, C.orange, C.orange, C.orange, C.orange, C.red, C.yellow]),
   shaymin: shape([
-    // white body, side view facing left: forehead → pointed snout → chin → belly → back legs
-    line([-0.55, -0.24], [-0.76, -0.12], [-0.98, 0.14], [-0.86, 0.3], [-0.72, 0.48], [-0.62, 0.72], [-0.45, 0.82], [0.35, 0.82], [0.55, 0.62], [0.64, 0.48]),
-    // the big leafy hedge on its back
-    tufts([[-0.55, -0.24], [-0.33, -0.57], [-0.14, -0.79], [0.14, -0.82], [0.48, -0.68], [0.76, -0.4], [0.98, -0.06], [1.0, 0.28], [0.82, 0.56], [0.64, 0.48]], 0.25, -0.05, 0.2),
-    ...[[0.12, -0.45], [-0.36, -0.35], [0.5, -0.2]].map(([x, y]) => arc(x, y, 0.06, 0.04, 0, TAU, 6)), // yellow seeds
-    polar((a) => 0.42 * (0.3 + 0.7 * Math.abs(Math.cos(a * 2.5 + 0.3)) ** 0.7), 60).map(([x, y]) => [x - 0.18, y - 0.05]), // the flower
-    arc(-0.18, -0.05, 0.07, 0.07, 0, TAU, 8),
-    line([0.0, 0.62], [0.2, 0.38], [0.42, 0.12], [0.3, 0.06], [0.08, 0.3], [0.0, 0.62]), // a dark leaf behind it
-    arc(-0.62, 0.05, 0.05, 0.08, 0, TAU, 8), // green eye
-    arc(-0.94, 0.13, 0.04, 0.04, 0, TAU, 6), // black nose
-    arc(-0.66, 0.32, 0.08, 0.06, 0, Math.PI, 6), // open mouth
-    line([-0.4, 0.82], [-0.4, 0.92]), line([-0.15, 0.82], [-0.15, 0.92]), line([0.15, 0.82], [0.15, 0.92]), line([0.35, 0.8], [0.38, 0.9]),
-  ], [C.white, C.green, C.yellow, C.yellow, C.yellow, C.pink, C.red, C.darkleaf, C.green, C.ink, C.pink, C.white, C.white, C.white, C.white]),
+    arc(0, 0.2, 0.68, 0.38, -0.15, Math.PI * 1.15, 24), // white belly and face; the green back covers the top
+    tufts(Array.from({ length: 13 }, (_, k) => { // the grassy back, with little spiky tufts
+      const a = Math.PI * (1.02 + (k / 12) * 0.96);
+      return [0.1 + Math.cos(a) * 0.62, 0.2 + Math.sin(a) * 0.52];
+    }), 0.1, 0.2, 0.13),
+    // the flower: five pointed petals and a yellow middle
+    polar((a) => 0.3 * (0.28 + 0.72 * Math.abs(Math.cos(a * 2.5 + Math.PI / 2)) ** 0.6), 70).map(([x, y]) => [x - 0.42, y - 0.22]),
+    arc(-0.42, -0.22, 0.06, 0.06, 0, TAU, 8),
+    arc(-0.5, 0.12, 0.05, 0.07, 0, TAU, 8),
+    line([-0.62, 0.27], [-0.55, 0.3]),
+    arc(-0.3, 0.57, 0.1, 0.05, Math.PI, TAU, 6), arc(0.25, 0.57, 0.1, 0.05, Math.PI, TAU, 6),
+  ], [C.white, C.green, C.pink, C.yellow, C.leaf, C.ink, C.white, C.white]),
   dog: shape([
     arc(0, 0, 0.5, 0.5),
     arc(-0.55, 0.08, 0.17, 0.38), arc(0.55, 0.08, 0.17, 0.38),
