@@ -1315,7 +1315,100 @@ const deviceId = (() => {
   }
 })();
 const letterLink = (id) => `${location.origin}${location.pathname}?letter=${id}`;
-const isMine = (letter) => letter.author === deviceId;
+const isMine = (letter) => letter.author === deviceId || (!!me && letter.from === me.handle);
+
+// ── your inbox: a name + 4 secret words (no email, no password) ──
+// The words are made here, shown to you once, and kept on this phone so you stay signed in.
+// The server only keeps a salted fingerprint of them, to check them.
+const SECRET_WORDS = 'moss fern leaf seed root bloom petal stem vine reed pine oak elm ash birch maple cedar willow ivy clover daisy lily rose tulip poppy lotus iris violet lilac sage mint thyme basil olive plum pear peach apple berry cherry lemon lime mango melon fig date grape kiwi cocoa honey sugar salt pepper toast bread cake pie jam tea milk cream butter cheese soup rice bean corn wheat oat barley rain snow hail mist fog dew frost storm cloud sky sun moon star comet orbit nova dawn dusk noon night ember spark flame smoke coal stone pebble sand dune shore wave tide reef coral shell pearl river creek brook lake pond pool bay cove cliff hill peak vale glen field meadow grove forest cave canyon delta island marsh swamp desert tundra prairie fox wolf bear deer elk moose hare rabbit otter beaver badger mole owl hawk crow robin wren finch swan duck goose heron crane stork gull puffin seal whale shark squid crab shrimp eel trout salmon koi frog toad newt snail slug bee wasp ant moth beetle cricket firefly spider lizard turtle panda koala lemur sloth tiger lion lynx puma zebra camel llama yak goat sheep lamb pony horse mule donkey kitten puppy piglet chick lantern candle kettle teapot cup bowl spoon fork plate basket rope knot thread needle button ribbon velvet silk wool cotton linen paper ink quill brush paint chalk crayon marble domino puzzle kite yoyo drum flute harp bell gong chime piano violin cello banjo whistle anchor sail oar raft canoe ferry'.split(' ');
+const makePhrase = () => [...crypto.getRandomValues(new Uint8Array(4))].map((b) => SECRET_WORDS[b]).join(' ');
+const cleanName = (text) => text.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_');
+const cleanPhrase = (text) => text.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+let me = (() => { try { return JSON.parse(localStorage.getItem('glyph-me') || 'null'); } catch { return null; } })();
+function saveMe(next) {
+  me = next;
+  try { if (me) localStorage.setItem('glyph-me', JSON.stringify(me)); else localStorage.removeItem('glyph-me'); } catch { /* ok */ }
+}
+const signed = () => (me ? { 'x-handle': me.handle, 'x-phrase': me.phrase } : {});
+// How many letters of each conversation you've seen (so new ones can glow).
+const seenCounts = () => { try { return JSON.parse(localStorage.getItem('glyph-seen') || '{}'); } catch { return {}; } };
+function markSeen(id, count) {
+  try { localStorage.setItem('glyph-seen', JSON.stringify({ ...seenCounts(), [id]: count })); } catch { /* ok */ }
+}
+const inboxNote = (text) => { $('inbox-note').textContent = text; };
+
+async function renderLetterTab() {
+  $('inbox-out').hidden = !!me;
+  $('inbox-in').hidden = !me;
+  $('my-letters').hidden = !!me;
+  if (!me) return renderMyLetters();
+  $('me-handle').textContent = `@${me.handle}`;
+  $('inbox-list').innerHTML = '<p class="quiet-text">opening your inbox…</p>';
+  try {
+    const res = await fetch('/api/inbox', { headers: signed() });
+    if (res.status === 401) { saveMe(null); inboxNote('those words stopped working — open your inbox again'); return renderLetterTab(); }
+    const { inbox } = await res.json();
+    const seen = seenCounts();
+    $('inbox-list').innerHTML = inbox.length ? inbox.map((e) => {
+      const who = e.with.length ? e.with.map((h) => `@${escapeHtml(h)}`).join(', ') : 'just you';
+      const theirs = e.lastFrom !== me.handle;
+      const fresh = theirs && e.count > (seen[e.thread] || 0);
+      const what = fresh ? 'new letter ✉' : theirs ? `“${escapeHtml(e.line)}”` : 'waiting for their reply';
+      return `<button data-id="${escapeHtml(e.thread)}" class="${fresh ? 'new' : ''}"><span class="who">${who}</span><span class="what">${what}</span></button>`;
+    }).join('') : '<p class="quiet-text">no letters yet — write a friend by their name</p>';
+  } catch {
+    $('inbox-list').innerHTML = '<p class="quiet-text">couldn’t reach your inbox — try again in a moment</p>';
+  }
+}
+$('inbox-list').addEventListener('click', (e) => { const id = e.target.closest('button')?.dataset.id; if (id) openLetter(id); });
+
+$('claim-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const handle = cleanName($('claim-name').value);
+  if (!/^[a-z0-9_]{3,16}$/.test(handle)) return inboxNote('a name is 3–16 letters, numbers or _');
+  const phrase = makePhrase();
+  const res = await fetch('/api/user', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, phrase }) }).catch(() => null);
+  if (!res?.ok) return inboxNote(res?.status === 409 ? `@${handle} is taken — try another` : 'couldn’t make it — try again');
+  saveMe({ handle, phrase });
+  inboxNote('');
+  showPhrase();
+  renderLetterTab();
+});
+$('have-inbox').addEventListener('click', () => { $('login-form').hidden = false; $('have-inbox').hidden = true; });
+$('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const handle = cleanName($('login-name').value);
+  const phrase = cleanPhrase($('login-phrase').value);
+  const res = await fetch('/api/user/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, phrase }) }).catch(() => null);
+  if (!res?.ok) return inboxNote(res?.status === 429 ? 'too many tries — wait 15 minutes' : 'that name and those words don’t match');
+  saveMe({ handle, phrase });
+  inboxNote('');
+  renderLetterTab();
+});
+function showPhrase() {
+  $('phrase-words').textContent = me.phrase.split(' ').join(' · ');
+  $('phrase-box').hidden = false;
+}
+$('show-phrase').addEventListener('click', () => ($('phrase-box').hidden ? showPhrase() : ($('phrase-box').hidden = true)));
+$('phrase-saved').addEventListener('click', () => { $('phrase-box').hidden = true; });
+$('sign-out').addEventListener('click', () => {
+  saveMe(null);
+  $('phrase-box').hidden = true;
+  inboxNote('signed out — your 4 words open your inbox again');
+  renderLetterTab();
+});
+$('letter-to-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const to = cleanName($('letter-to').value);
+  if (!to) return inboxNote('who’s it for? type their name');
+  const res = await fetch(`/api/user/${encodeURIComponent(to)}`).catch(() => null);
+  const { exists } = res?.ok ? await res.json() : {};
+  if (!exists) return inboxNote(`no one’s called @${to} yet — ask them to make an inbox`);
+  inboxNote('');
+  state.thread = null;
+  state.letterTo = to;
+  writeLetter(null);
+});
 
 // The conversations this device has been part of, newest first (so you can find them again).
 function myLetters() {
@@ -1349,9 +1442,9 @@ function writeLetter(threadId) {
   if (threadId && COLORS[0] === PALETTE[theirs]) COLORS[0] = Object.values(PALETTE).find((c) => c !== COLORS[0]);
   showLocalSetup();
 }
-$('letter-write').addEventListener('click', () => { state.thread = null; writeLetter(null); });
-$('letter-reply').addEventListener('click', () => writeLetter(state.thread.id));
-$('letter-write-back').addEventListener('click', () => writeLetter(state.thread.id));
+$('letter-write').addEventListener('click', () => { state.thread = null; state.letterTo = null; writeLetter(null); });
+$('letter-reply').addEventListener('click', () => { state.letterTo = null; writeLetter(state.thread.id); });
+$('letter-write-back').addEventListener('click', () => { state.letterTo = null; writeLetter(state.thread.id); });
 
 $('letter-send').addEventListener('click', async () => {
   const button = $('letter-send');
@@ -1366,10 +1459,11 @@ $('letter-send').addEventListener('click', async () => {
       };
       const res = await fetch(state.writingIn ? `/api/letter/${state.writingIn}` : '/api/letter', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ letter, author: deviceId }),
+        headers: { 'content-type': 'application/json', ...signed() },
+        body: JSON.stringify({ letter, author: deviceId, to: state.writingIn ? undefined : state.letterTo || undefined }),
       });
       if (!res.ok) throw new Error(res.status);
+      if (me) letter.from = me.handle;
       const { id } = await res.json();
       const earlier = state.thread?.id === id ? state.thread.letters : [];
       state.thread = { id, letters: [...earlier, { ...letter, author: deviceId }] };
@@ -1381,6 +1475,11 @@ $('letter-send').addEventListener('click', async () => {
       button.textContent = 'couldn’t send — try again';
       return;
     }
+  }
+  // In an inbox conversation it's already in their inbox: no link to send (but it's there if you want it).
+  if (me && (state.letterTo || state.writingIn) && state.thread) {
+    button.textContent = state.letterTo ? `sent to @${state.letterTo} ✓` : 'sent ✓';
+    return;
   }
   await shareLetter(state.writingIn ? 'i wrote back ✉' : 'i wrote you a letter ✉', button);
 });
@@ -1408,25 +1507,27 @@ async function openLetter(id) {
   try {
     const res = await fetch(`/api/letter/${id}`);
     if (!res.ok) throw new Error(res.status);
-    const { letters } = await res.json();
-    state.thread = { id, letters };
+    const { letters, people } = await res.json();
+    state.thread = { id, letters, people };
   } catch {
     $('letter-from').textContent = 'this letter got lost — ask them to send it again';
     return;
   }
   rememberLetter(id, state.thread.letters[0].messages[0]);
   const { letters } = state.thread;
+  markSeen(id, letters.length);
   const last = letters.at(-1);
   const mine = isMine(last);
+  const them = last.from ? `@${last.from}` : 'someone';
   $('letter-from').textContent = mine
     ? (letters.length === 1 ? 'your letter is out there ✉ waiting for them to write back' : 'you wrote last ✉ waiting for their reply')
-    : (letters.length === 1 ? 'someone wrote you a letter ✉' : 'they wrote back ✉');
+    : (letters.length === 1 ? `${them} wrote you a letter ✉` : `${last.from ? them : 'they'} wrote back ✉`);
   $('letter-open-btn').textContent = mine ? 'hear yours again' : 'open it';
   $('letter-open-btn').hidden = false;
   $('letter-write-back').hidden = mine;
   $('letter-share').hidden = !mine;
   $('letter-thread').hidden = letters.length < 2;
-  $('letter-list').innerHTML = letters.map((l, i) => `<button data-i="${i}" style="color:${rgb(PALETTE[l.color] || COLORS[0])}">${i + 1} · ${isMine(l) ? 'you' : 'them'}</button>`).join('');
+  $('letter-list').innerHTML = letters.map((l, i) => `<button data-i="${i}" style="color:${rgb(PALETTE[l.color] || COLORS[0])}">${i + 1} · ${isMine(l) ? 'you' : l.from ? `@${escapeHtml(l.from)}` : 'them'}</button>`).join('');
 }
 $('letter-open-btn').addEventListener('click', () => playLetter(state.thread.letters.length - 1));
 $('letter-list').addEventListener('click', (e) => { const i = e.target.closest('button')?.dataset.i; if (i !== undefined) playLetter(Number(i)); });
@@ -1682,7 +1783,7 @@ const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
   party: 'Up to 8 people, no turns: throw words into the void whenever you like. Once everyone has said something, the garden dances; after a few rounds, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
-  letter: 'Write someone 4 lines. No dances, straight to the song — then send it. They hear your song and write back the same way.',
+  letter: 'Write a friend 4 lines: no dances, straight to the song. Make an inbox and friends can write to you by name; or just send a letter as a link.',
   jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 45 seconds, your taps become a song.',
 };
 function pickMode(mode) {
@@ -1691,7 +1792,7 @@ function pickMode(mode) {
   document.querySelector('.modes').style.setProperty('--i', tabs.findIndex((b) => b.dataset.mode === mode)); // slide the pill
   $('mode-blurb').textContent = BLURBS[mode];
   for (const m of ['duet', 'party', 'diary', 'jam', 'letter']) $(`mode-${m}`).hidden = m !== mode;
-  if (mode === 'letter') renderMyLetters();
+  if (mode === 'letter') renderLetterTab();
   $('join-form').hidden = mode === 'diary' || mode === 'letter';
   $('local').hidden = mode !== 'duet';
 }

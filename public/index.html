@@ -39,7 +39,35 @@
       <button id="diary">open your diary</button>
     </div>
     <div id="mode-letter" hidden>
-      <button id="letter-write">write a letter</button>
+      <!-- not signed in: make an inbox (a name + 4 secret words), or open yours on this phone -->
+      <div id="inbox-out">
+        <form id="claim-form" class="row fields">
+          <input id="claim-name" class="field" maxlength="17" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="pick a name">
+          <button type="submit">make my inbox</button>
+        </form>
+        <button id="have-inbox" class="quiet" type="button">I already have one</button>
+        <form id="login-form" class="fields" hidden>
+          <input id="login-name" class="field" maxlength="17" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="your name">
+          <input id="login-phrase" class="field wide" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="your 4 secret words">
+          <button type="submit">open my inbox</button>
+        </form>
+        <button id="letter-write" class="quiet">or just write a letter (send it as a link)</button>
+      </div>
+      <!-- signed in: your inbox -->
+      <div id="inbox-in" hidden>
+        <p class="quiet-text">you're <b id="me-handle"></b> · <button id="show-phrase" class="link" type="button">my secret words</button> · <button id="sign-out" class="link" type="button">sign out</button></p>
+        <form id="letter-to-form" class="row fields">
+          <input id="letter-to" class="field wide" maxlength="17" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="to: a friend's name">
+          <button type="submit">write ✉</button>
+        </form>
+        <div id="inbox-list"></div>
+      </div>
+      <div id="phrase-box" hidden>
+        <p class="quiet-text">your secret words — save them (a screenshot or a note). you'll need them to open your inbox on another phone:</p>
+        <p id="phrase-words"></p>
+        <button id="phrase-saved" type="button">saved them ✓</button>
+      </div>
+      <p id="inbox-note" class="quiet-text"></p>
       <div id="my-letters"></div>
     </div>
     <div id="mode-jam" hidden>

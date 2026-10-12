@@ -175,6 +175,18 @@ html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: v
 }
 body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bottom: auto; } /* a third of the way down: just above the keyboard, even on small iPhones */
 #mic.voiced { border-color: #ffd27a; color: #ffd27a; }
+/* inbox: name + words forms, the list of conversations */
+.fields { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
+.field { font: inherit; font-size: 16px; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; width: 11em; text-align: center; }
+.field.wide { width: 15em; }
+button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decoration: underline; font-size: inherit; }
+#phrase-words { color: #ffd27a; font-size: 18px; letter-spacing: 0.06em; margin: 6px 0 10px; }
+#inbox-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 32vh; overflow-y: auto; }
+#inbox-list button { margin: 0; padding: 8px 14px; font-size: 13px; text-align: left; display: flex; justify-content: space-between; gap: 10px; }
+#inbox-list button .who { color: var(--ink); }
+#inbox-list button .what { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inbox-list button.new { border-color: #ffd27a; }
+#inbox-list button.new .what { color: #ffd27a; }
 /* letters: your conversations on the title screen, and a thread's letters */
 #my-letters { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 #my-letters button { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--dim); border-color: var(--line); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

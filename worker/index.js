@@ -40,6 +40,34 @@ export default {
       return env.ROOMS.getByName(code).fetch(request);
     }
 
+    // Inboxes: a name (@tavi) + 4 secret words. The words never leave your phone except to be
+    // checked; the server keeps only a salted fingerprint of them (a hash).
+    //   POST /api/user        { handle, phrase } → claim a name
+    //   POST /api/user/login  { handle, phrase } → check the words (to sign in on a new phone)
+    //   GET  /api/user/NAME   → { exists }
+    //   GET  /api/inbox       (signed) → your conversations
+    if (url.pathname === '/api/user' && request.method === 'POST') {
+      const { handle, phrase } = (await request.json().catch(() => null)) || {};
+      if (!HANDLE.test(handle || '') || !PHRASE.test(phrase || '')) return new Response('bad name or words', { status: 400 });
+      const ok = await env.ROOMS.getByName(`user:${handle}`).claimUser(handle, phrase);
+      return ok ? Response.json({ handle }) : new Response('taken', { status: 409 });
+    }
+    if (url.pathname === '/api/user/login' && request.method === 'POST') {
+      const { handle, phrase } = (await request.json().catch(() => null)) || {};
+      if (!HANDLE.test(handle || '') || !PHRASE.test(phrase || '')) return new Response('bad name or words', { status: 400 });
+      const result = await env.ROOMS.getByName(`user:${handle}`).checkUser(phrase);
+      return result === 'ok' ? Response.json({ handle }) : new Response(result, { status: result === 'locked' ? 429 : 401 });
+    }
+    const userMatch = url.pathname.match(/^\/api\/user\/([a-z0-9_]{3,16})$/);
+    if (userMatch && request.method === 'GET') {
+      return Response.json({ exists: await env.ROOMS.getByName(`user:${userMatch[1]}`).hasUser() });
+    }
+    if (url.pathname === '/api/inbox') {
+      const me = await whoIs(request, env);
+      if (!me) return new Response('sign in', { status: 401 });
+      return Response.json({ handle: me, inbox: await env.ROOMS.getByName(`user:${me}`).getInbox() });
+    }
+
     // Letters: one link per conversation (a thread). You write 4 lines and send the link;
     // they write back into the same thread; anyone with the link can come back and see it all.
     //   POST /api/letter          { letter, author } → a new thread, { id }
@@ -49,9 +77,17 @@ export default {
       const body = await request.json().catch(() => null);
       const letter = cleanLetter(body?.letter, body?.author);
       if (!letter) return new Response('bad letter', { status: 400 });
+      // Addressed to someone's inbox? You need to be signed in, and they need to exist.
+      const me = await whoIs(request, env);
+      const to = typeof body?.to === 'string' ? body.to.toLowerCase().replace(/^@/, '') : '';
+      if (to && !me) return new Response('sign in to write to a name', { status: 401 });
+      if (to && (!HANDLE.test(to) || !(await env.ROOMS.getByName(`user:${to}`).hasUser()))) return new Response('no such name', { status: 404 });
+      if (me) letter.from = me;
       const id = letterId();
-      await env.ROOMS.getByName(`letter:${id}`).addLetter(letter, false);
-      return Response.json({ id, count: 1 });
+      const people = to ? [me, to].filter((h, i, all) => all.indexOf(h) === i) : me ? [me] : [];
+      const { count } = await env.ROOMS.getByName(`letter:${id}`).addLetter(letter, false, people);
+      await deliver(env, id, people, letter, count);
+      return Response.json({ id, count });
     }
     const letterMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})$/);
     if (letterMatch) {
@@ -61,11 +97,15 @@ export default {
         const body = await request.json().catch(() => null);
         const letter = cleanLetter(body?.letter, body?.author);
         if (!letter) return new Response('bad letter', { status: 400 });
-        const count = await thread.addLetter(letter, true);
-        return count ? Response.json({ id, count }) : new Response('no such letter', { status: 404 });
+        const me = await whoIs(request, env);
+        if (me) letter.from = me;
+        const added = await thread.addLetter(letter, true, me ? [me] : []);
+        if (!added) return new Response('no such letter', { status: 404 });
+        await deliver(env, id, added.people, letter, added.count);
+        return Response.json({ id, count: added.count });
       }
       const letters = await thread.getThread();
-      return letters ? Response.json({ id, letters }) : new Response('no such letter', { status: 404 });
+      return letters ? Response.json({ id, letters, people: await thread.getPeople() }) : new Response('no such letter', { status: 404 });
     }
 
     // The word log. POST: count a one-screen game's message. GET: the top words (private).
@@ -106,6 +146,35 @@ function cleanLetter(raw, author) {
     sent: Date.now(),
   };
 }
+// Names: 3–16 of a-z, 0-9, _. Secret words: 4 lowercase words with spaces.
+const HANDLE = /^[a-z0-9_]{3,16}$/;
+const PHRASE = /^[a-z]{2,12}( [a-z]{2,12}){3}$/;
+
+// Who's asking? A signed request carries x-handle + x-phrase; null if missing or wrong.
+async function whoIs(request, env) {
+  const handle = (request.headers.get('x-handle') || '').toLowerCase();
+  const phrase = request.headers.get('x-phrase') || '';
+  if (!HANDLE.test(handle) || !PHRASE.test(phrase)) return null;
+  return (await env.ROOMS.getByName(`user:${handle}`).checkUser(phrase)) === 'ok' ? handle : null;
+}
+
+// A letter landed in a conversation: everyone in it sees it at the top of their inbox.
+async function deliver(env, thread, people, letter, count) {
+  await Promise.all(people.map((handle) => env.ROOMS.getByName(`user:${handle}`).touchInbox({
+    thread,
+    with: people.filter((h) => h !== handle),
+    lastFrom: letter.from || null,
+    count,
+    line: letter.messages[0],
+    at: letter.sent,
+  })));
+}
+
+async function fingerprint(salt, phrase) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${salt}:${phrase}`));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function letterId() {
   const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
   return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => abc[b % abc.length]).join('');
@@ -121,13 +190,56 @@ export class Room extends DurableObject {
     return single ? [single] : null;
   }
 
+  // The names in this conversation (empty for a link-only letter).
+  async getPeople() {
+    return (await this.ctx.storage.get('people')) || [];
+  }
+
   // Adds a letter; mustExist = it's a reply (a thread that isn't there → null).
-  async addLetter(letter, mustExist) {
+  // join = names to add to the conversation (whoever wrote this letter, signed in).
+  async addLetter(letter, mustExist, join = []) {
     const letters = await this.getThread();
     if (mustExist && !letters) return null;
     const next = [...(letters || []), letter].slice(-THREAD_MAX);
-    await this.ctx.storage.put('letters', next);
-    return next.length;
+    const people = [...new Set([...(await this.getPeople()), ...join])];
+    await this.ctx.storage.put({ letters: next, people });
+    return { count: next.length, people };
+  }
+
+  // ── an inbox (a Room named user:NAME) ──
+  async hasUser() {
+    return !!(await this.ctx.storage.get('user'));
+  }
+
+  async claimUser(handle, phrase) {
+    if (await this.ctx.storage.get('user')) return false;
+    const salt = crypto.randomUUID();
+    await this.ctx.storage.put('user', { handle, salt, hash: await fingerprint(salt, phrase), created: Date.now(), fails: 0, lockedUntil: 0 });
+    await this.ctx.storage.put('inbox', []);
+    return true;
+  }
+
+  // 'ok' | 'bad' | 'none' | 'locked'. Ten wrong tries locks the name for 15 minutes.
+  async checkUser(phrase) {
+    const user = await this.ctx.storage.get('user');
+    if (!user) return 'none';
+    if (Date.now() < user.lockedUntil) return 'locked';
+    if ((await fingerprint(user.salt, phrase)) === user.hash) {
+      if (user.fails) await this.ctx.storage.put('user', { ...user, fails: 0 });
+      return 'ok';
+    }
+    const fails = user.fails + 1;
+    await this.ctx.storage.put('user', { ...user, fails: fails >= 10 ? 0 : fails, lockedUntil: fails >= 10 ? Date.now() + 15 * 60_000 : 0 });
+    return 'bad';
+  }
+
+  async getInbox() {
+    return (await this.ctx.storage.get('inbox')) || [];
+  }
+
+  async touchInbox(entry) {
+    const inbox = (await this.getInbox()).filter((e) => e.thread !== entry.thread);
+    await this.ctx.storage.put('inbox', [entry, ...inbox].slice(0, 200));
   }
 
   // room = { mode, seed, players: [{ id, voice, color, entered } | null, …],
