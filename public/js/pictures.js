@@ -80,6 +80,38 @@ function tufts(pts, cx, cy, spike = 0.12) {
   return out;
 }
 
+// A lumpy outline through the given points: each stretch bulges outward (away from cx, cy)
+// in a round bump, like a bush or a cloud.
+function bumps(pts, cx, cy, height = 0.6) {
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[i + 1];
+    const len = Math.hypot(bx - ax, by - ay);
+    let [nx, ny] = [-(by - ay) / len, (bx - ax) / len];
+    const [mx, my] = [(ax + bx) / 2, (ay + by) / 2];
+    if (nx * (mx - cx) + ny * (my - cy) < 0) [nx, ny] = [-nx, -ny]; // point the bump outward
+    for (let k = 0; k < 6; k++) {
+      const f = k / 6;
+      const h = Math.sin(f * Math.PI) * height * (len / 2);
+      out.push([ax + (bx - ax) * f + nx * h, ay + (by - ay) * f + ny * h]);
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+// A flower: n round petals around (cx, cy), each its own little loop.
+const flower = (cx, cy, r, n = 5) => Array.from({ length: n }, (_, k) => {
+  const a = -Math.PI / 2 + (k / n) * TAU;
+  const [px, py] = [cx + Math.cos(a) * r * 0.55, cy + Math.sin(a) * r * 0.55];
+  return Array.from({ length: 11 }, (_, i) => {
+    const b = (i / 10) * TAU;
+    const [u, v] = [Math.cos(b) * r * 0.48, Math.sin(b) * r * 0.3]; // along the petal, across it
+    return [px + u * Math.cos(a) - v * Math.sin(a), py + u * Math.sin(a) + v * Math.cos(a)];
+  });
+});
+
 // Colours a picture can paint itself in.
 const C = {
   yellow: [255, 222, 70], orange: [255, 150, 50], red: [255, 80, 80], green: [110, 215, 105],
@@ -259,22 +291,22 @@ const DRAWINGS = {
     const body = [
       // white hedgehog body: from where the green back starts, down the face to a little
       // pointed snout, under the chin, along the belly, and up to the back of the green
-      line([-0.52, 0.18], [-0.66, 0.24], [-0.88, 0.33], [-0.72, 0.42], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
-      tufts(Array.from({ length: 13 }, (_, k) => { // the grassy back, with little spiky tufts
-        const a = Math.PI * (1.02 + (k / 12) * 0.96);
-        return [0.1 + Math.cos(a) * 0.62, 0.2 + Math.sin(a) * 0.52];
-      }), 0.1, 0.2, 0.13),
+      line([-0.52, 0.18], [-0.64, 0.24], [-0.75, 0.27], [-0.83, 0.3], [-0.87, 0.34], [-0.85, 0.38], [-0.78, 0.41], [-0.68, 0.45], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
+      bumps(Array.from({ length: 8 }, (_, k) => { // the bushy green back, in round lumps
+        const a = Math.PI * (1.02 + (k / 7) * 0.96);
+        return [0.1 + Math.cos(a) * 0.6, 0.2 + Math.sin(a) * 0.5];
+      }), 0.1, 0.2, 0.9),
       // the flower, on its side (inside the body, so it doesn't sit on the outline's glyphs)
-      polar((a) => 0.24 * (0.28 + 0.72 * Math.abs(Math.cos(a * 2.5 + Math.PI / 2)) ** 0.6), 60).map(([x, y]) => [x - 0.08, y + 0.12]),
-      arc(-0.08, 0.12, 0.05, 0.05, 0, TAU, 6),
+      ...flower(-0.08, 0.12, 0.3),
+      arc(-0.08, 0.12, 0.045, 0.045, 0, TAU, 6),
       arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8), // eye
-      arc(-0.88, 0.33, 0.03, 0.03, 0, TAU, 6), // nose
+      arc(-0.86, 0.34, 0.03, 0.03, 0, TAU, 6), // nose
     ].map(lean);
     // four little legs, straight down to one ground line (so the back ones are shorter)
     const tops = [-0.38, -0.14, 0.14, 0.38].map((x) => lean([[x, 0.58]])[0]);
     const ground = Math.max(...tops.map(([, y]) => y)) + 0.12;
     const legs = tops.map(([x, y]) => [[x, y], [x, ground]]);
-    return shape([...body, ...legs], [C.white, C.green, C.pink, C.yellow, C.leaf, C.ink, C.white, C.white, C.white, C.white]);
+    return shape([...body, ...legs], [C.white, C.green, C.pink, C.pink, C.pink, C.pink, C.pink, C.yellow, C.leaf, C.ink, C.white, C.white, C.white, C.white]);
   })(),
   dog: shape([
     arc(0, 0, 0.5, 0.5),
