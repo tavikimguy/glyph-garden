@@ -1021,12 +1021,15 @@ function sketch(p) {
     const pulse = beatPulse();
     for (const g of state.glyphs) {
       if (now < g.born) continue;
-      const [r, gg, b] = tintOf(g, now);
       const decoded = g.decodeAt !== null && now >= g.decodeAt + SCRAMBLE_MS && !g.tint;
+      // Decoded letters keep their colour, a little brighter (a picture's paint stays exact),
+      // so an olive stays green and red all song long, every time round.
+      const lift = decoded && !(g.paint && g.mode === 'form') ? 0.35 : 0;
+      const [r, gg, b] = tintOf(g, now).map((c) => c + (255 - c) * lift);
       const glow = Math.max(g.flash, decoded ? 0.35 : 0);
       ctx.shadowBlur = glow > 0.05 && !SMALL_SCREEN ? 6 + glow * 18 : 0; // glow is costly on phones
       ctx.shadowColor = `rgba(${r}, ${gg}, ${b}, ${0.8 * glow})`;
-      p.fill(decoded ? 245 : r, decoded ? 245 : gg, decoded ? 250 : b, 255 * alphaOf(g));
+      p.fill(r, gg, b, 255 * alphaOf(g));
       const scale = 1 + pulse * 0.18;
       // Feelings leak through: happy glyphs hop, excited ones spin, sad ones dim and shrink.
       let hop = 0;
@@ -1037,7 +1040,7 @@ function sketch(p) {
         else if (g.mood === 'excited') spin = t * 2.5 + g.seed;
         else if (g.mood === 'sad') {
           shrink = 0.88;
-          p.fill(decoded ? 245 : r, decoded ? 245 : gg, decoded ? 250 : b, 150 * alphaOf(g));
+          p.fill(r, gg, b, 150 * alphaOf(g));
         }
       }
       p.textSize(size * scale * shrink * (1 + g.flash * 0.35));
