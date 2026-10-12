@@ -225,24 +225,30 @@ const DRAWINGS = {
     line([-0.12, 0.33], [-0.06, 0.4], [0, 0.34], [0.06, 0.4], [0.12, 0.33]),
   ], [C.yellow, C.yellow, C.yellow, C.ink, C.ink, C.ink, C.ink, C.red, C.red, C.ink]),
   charmander: shape([
-    arc(-0.1, -0.45, 0.33, 0.3),
-    arc(-0.1, 0.28, 0.36, 0.42),
-    arc(-0.1, 0.33, 0.2, 0.28, 0, TAU, 14),
-    line([0.22, 0.5], [0.5, 0.45], [0.68, 0.2], [0.72, -0.05]),
-    arc(0.74, -0.25, 0.13, 0.2, 0, TAU, 12),
-    arc(0.74, -0.2, 0.06, 0.1, 0, TAU, 8),
-    arc(-0.2, -0.5, 0.05, 0.07, 0, TAU, 8), arc(0.04, -0.5, 0.05, 0.07, 0, TAU, 8),
-  ], [C.orange, C.orange, C.cream, C.orange, C.red, C.yellow, C.ink, C.ink]),
+    arc(-0.08, -0.42, 0.36, 0.33),
+    arc(-0.2, -0.47, 0.055, 0.09, 0, TAU, 8), arc(0.06, -0.47, 0.055, 0.09, 0, TAU, 8),
+    arc(-0.07, -0.36, 0.15, 0.08, Math.PI * 0.15, Math.PI * 0.85, 8),
+    arc(-0.08, 0.25, 0.3, 0.36),
+    arc(-0.08, 0.3, 0.17, 0.24, 0, TAU, 14),
+    line([-0.36, 0.08], [-0.52, 0.22]), line([0.2, 0.08], [0.36, 0.22]),
+    arc(-0.22, 0.62, 0.12, 0.06, Math.PI, TAU, 8), arc(0.06, 0.62, 0.12, 0.06, Math.PI, TAU, 8),
+    line([0.2, 0.45], [0.42, 0.52], [0.6, 0.42], [0.7, 0.2], [0.7, 0.0]),
+    line([0.7, -0.48], [0.81, -0.22], [0.77, -0.06], [0.7, -0.01], [0.63, -0.06], [0.59, -0.22], [0.7, -0.48]),
+    line([0.7, -0.3], [0.75, -0.15], [0.7, -0.08], [0.65, -0.15], [0.7, -0.3]),
+  ], [C.orange, C.ink, C.ink, C.ink, C.orange, C.cream, C.orange, C.orange, C.orange, C.orange, C.orange, C.red, C.yellow]),
   shaymin: shape([
-    arc(0, 0.28, 0.68, 0.32, 0, Math.PI, 20),
-    Array.from({ length: 25 }, (_, i) => {
-      const a = Math.PI + (i / 24) * Math.PI;
-      const bump = 1 + 0.12 * Math.abs(Math.sin(i * 1.3));
-      return [Math.cos(a) * 0.68 * bump, 0.28 + Math.sin(a) * 0.55 * bump];
+    arc(0, 0.2, 0.68, 0.38, -0.15, Math.PI * 1.15, 24), // white belly and face; the green back covers the top
+    Array.from({ length: 41 }, (_, k) => {
+      const a = Math.PI * (1.02 + (k / 40) * 0.96);
+      const r = 1 + 0.1 * Math.abs(Math.sin(k * 0.55 * Math.PI)); // a scalloped, grassy back
+      return [0.1 + Math.cos(a) * 0.62 * r, 0.2 + Math.sin(a) * 0.52 * r];
     }),
-    petals(-0.45, -0.2, 0.2),
-    arc(0.25, 0.25, 0.05, 0.07, 0, TAU, 8), arc(0.45, 0.25, 0.05, 0.07, 0, TAU, 8),
-  ], [C.white, C.green, C.pink, C.ink, C.ink]),
+    petals(-0.48, -0.25, 0.2),
+    arc(-0.48, -0.25, 0.05, 0.05, 0, TAU, 6),
+    arc(-0.5, 0.12, 0.05, 0.07, 0, TAU, 8),
+    line([-0.62, 0.27], [-0.55, 0.3]),
+    arc(-0.3, 0.57, 0.1, 0.05, Math.PI, TAU, 6), arc(0.25, 0.57, 0.1, 0.05, Math.PI, TAU, 6),
+  ], [C.white, C.green, C.pink, C.yellow, C.leaf, C.ink, C.white, C.white]),
   dog: shape([
     arc(0, 0, 0.5, 0.5),
     arc(-0.55, 0.08, 0.17, 0.38), arc(0.55, 0.08, 0.17, 0.38),
@@ -375,7 +381,7 @@ const MOTION = {
   },
   pikachu: (x, y, t) => [x + (y < -0.2 ? Math.sin(t * 6) * 0.04 : 0), y - Math.abs(Math.sin(t * 2.5)) * 0.12],
   charmander: (x, y, t) => {
-    if (x > 0.6 && y < 0) return [x + Math.sin(t * 9 + y * 10) * 0.05, y * (1 + Math.sin(t * 11) * 0.1)]; // the tail flame flickers
+    if (x > 0.56 && y < 0) return [x + Math.sin(t * 9 + y * 10) * 0.04, y * (1 + Math.sin(t * 11) * 0.12)]; // the tail flame flickers
     return [x + Math.sin(t * 1.2) * 0.05, y];
   },
   shaymin: (x, y, t) => [x + Math.sin(t * 0.7) * 0.15, y - Math.abs(Math.sin(t * 1.8)) * 0.08],

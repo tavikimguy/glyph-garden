@@ -5,7 +5,7 @@
 
 import { translate } from './hangul.js';
 import { makeCipher, encode, randomSymbol, hash, seededRandom, SYMBOLS } from './glyphs.js';
-import { FORMATIONS, PATTERN_NAMES } from './formations.js';
+import { FORMATIONS, PATTERN_NAMES, PICTURE_NAMES } from './formations.js';
 import { PICTURE_WORDS } from './pictures.js';
 import { PROMPTS, openMic, startRecording, processClip, finishBank, prepareSung } from './voicebank.js';
 import {
@@ -762,7 +762,20 @@ function hueToRgb(h) {
 }
 
 // A glyph's colour: its dye if a picture coloured it, else its player's colour.
+// The colour a glyph is showing: it glides toward its wanted colour (below) instead of
+// jumping, so a picture's paint arrives as the glyphs fly into the shape, not before.
 function tintOf(g, now) {
+  return g.shade || wantedTint(g, now);
+}
+
+function fadeTint(g, dt, now) {
+  const want = wantedTint(g, now);
+  if (!g.shade) { g.shade = [...want]; return; }
+  const k = Math.min(1, dt * 2.2);
+  for (let i = 0; i < 3; i++) g.shade[i] += (want[i] - g.shade[i]) * k;
+}
+
+function wantedTint(g, now) {
   if (state.formation?.golden && g.mode === 'form') return [255, 215, 120];
   if (g.paint && g.mode === 'form') return g.paint; // a picture painting its parts (olive green, pit red)
   if (g.tint === 'rainbow') return hueToRgb((g.fi * 9 + now / 25) % 360);
@@ -815,6 +828,7 @@ function updateGlyphs(dt, t, now) {
 
   for (const g of state.glyphs) {
     if (now < g.born) continue;
+    fadeTint(g, dt, now);
     if (g.mode === 'thrown') {
       if (!g.launched) {
         g.launched = true;
@@ -897,7 +911,7 @@ function updateGlyphs(dt, t, now) {
         bump(a.sym + b.sym, strength);
         state.ripples.push({
           x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, born: now,
-          color: tintOf(a, now), strength: 0.5 + strength * 0.5, rings: 2,
+          color: [...tintOf(a, now)], strength: 0.5 + strength * 0.5, rings: 2,
         });
         a.flash = Math.max(a.flash, 0.5);
         b.flash = Math.max(b.flash, 0.5);
@@ -1171,6 +1185,52 @@ $('message').addEventListener('input', () => {
     state.online.conn.send({ type: 'typing' });
   }
 });
+// ───────────────────────── pattern viewer (dev only: /?patterns on localhost) ─────────────────────────
+// Every dance and picture, one click each, with real glyphs in motion. ← → to step through.
+function openPatternViewer() {
+  resetGarden(12345);
+  state.mode = 'duet';
+  state.order = [0, 1];
+  state.phase = 'gallery';
+  show(null);
+  const names = [...PATTERN_NAMES, ...PICTURE_NAMES];
+  const panel = document.createElement('div');
+  panel.id = 'pattern-viewer';
+  panel.innerHTML = `<p class="quiet-text">patterns · ← → to step · <label><input type="checkbox" id="pv-gold"> gold</label> · glyphs
+    <select id="pv-count"><option>40</option><option selected>80</option><option>140</option></select></p>
+    <div>${names.map((n) => `<button data-name="${n}" class="${PICTURE_NAMES.includes(n) ? 'pic' : ''}">${n}</button>`).join('')}</div>`;
+  document.body.append(panel);
+  let current = 0;
+  let take = 0;
+  const fill = (count) => {
+    state.glyphs = [];
+    state.messages = Array.from({ length: 4 }, (_, m) => ({ player: m % 2, text: '', words: [] }));
+    for (let i = 0; i < count; i++) {
+      const m = i % 4;
+      state.glyphs.push({
+        ch: 'x', sym: SYMBOLS[(i * 7) % SYMBOLS.length], player: m % 2, msg: m, wi: 0, col: i, len: count,
+        x: Math.random() * P.width, y: Math.random() * P.height, vx: 0, vy: 0,
+        mode: 'free', entered: true, launched: true, born: 0, flash: 0, decodeAt: null,
+        quietUntil: Infinity, seed: Math.random() * 1000, mood: 'calm', revealAt: null,
+      });
+    }
+  };
+  const play = (i) => {
+    current = (i + names.length) % names.length;
+    panel.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === current));
+    startFormation(names[current], `gallery${take++}`, $('pv-gold').checked);
+  };
+  fill(80);
+  play(0);
+  panel.addEventListener('click', (e) => { if (e.target.dataset.name) play(names.indexOf(e.target.dataset.name)); });
+  $('pv-count').addEventListener('change', () => { fill(Number($('pv-count').value)); play(current); });
+  $('pv-gold').addEventListener('change', () => play(current));
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') play(current + 1);
+    if (e.key === 'ArrowLeft') play(current - 1);
+  });
+}
+
 // ───────────────────────── letters ─────────────────────────
 // Write 4 lines, hear them as a song, send the link. They open it, hear the same song
 // (same seed → same glyphs, same music), and write back the same way.
@@ -2060,7 +2120,8 @@ const linkParams = new URLSearchParams(location.search);
 const roomFromLink = linkParams.get('room');
 const screenFromLink = linkParams.get('screen');
 const letterFromLink = linkParams.get('letter');
-if (letterFromLink && /^[a-z0-9]{8}$/.test(letterFromLink)) openLetter(letterFromLink);
+if (linkParams.has('patterns') && ['localhost', '127.0.0.1'].includes(location.hostname)) setTimeout(openPatternViewer, 300);
+else if (letterFromLink && /^[a-z0-9]{8}$/.test(letterFromLink)) openLetter(letterFromLink);
 else if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
 else if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
 
