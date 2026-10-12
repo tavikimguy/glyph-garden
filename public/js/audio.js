@@ -67,7 +67,6 @@ const ROBOTS = {
 // Instrument "voices": the player's melody played on an instrument instead of sung.
 // make() builds the instrument; base = the pitch range it plays around.
 const INSTRUMENTS = {
-  guitar: { base: 200, make: () => new Tone.PluckSynth({ attackNoise: 1.2, dampening: 3800, resonance: 0.97, volume: -11 }) },
   electric: {
     base: 220,
     make: () => new Tone.PluckSynth({ attackNoise: 2, dampening: 5000, resonance: 0.985, volume: -13 }),
@@ -104,6 +103,7 @@ export const VOICE_GROUPS = { instruments: Object.keys(INSTRUMENTS), voices: Obj
 // so handing out fresh objects piled up engines until the audio choked.
 const voices = {};
 export function robotVoice(name) {
+  if (!INSTRUMENTS[name] && !ROBOTS[name]) name = 'marimba'; // a voice we no longer have (guitar was retired)
   voices[name] ??= INSTRUMENTS[name]
     ? { instrument: name, basePitch: INSTRUMENTS[name].base }
     : { robot: name, basePitch: (ROBOTS[name] || ROBOTS.velvet).base };
@@ -538,7 +538,7 @@ function singRecorded(sung, n, time, freq, dur, reverse = false) {
   at(time + dur + 1, () => player.dispose());
 }
 
-// voice = a recorded bank ({ clips }), a robot ({ robot: 'silk' }) or an instrument ({ instrument: 'guitar' }).
+// voice = a recorded bank ({ clips }), a robot ({ robot: 'silk' }) or an instrument ({ instrument: 'marimba' }).
 // solo = the song's featured line: an instrument plays clean and up front, ringing on.
 function sing(voice, syl, time, freq, dur, reverse = false, solo = false) {
   if (voice?.clips) singFromBank(voice, syl, time, freq, dur, reverse);

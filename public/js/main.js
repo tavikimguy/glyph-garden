@@ -91,7 +91,7 @@ const state = {
   promptIdx: 0,
   clips: {},
   focus: -1, // message being sung in the finale
-  robots: ['guitar', 'keys'], // instrument/robot voice per player if they don't record
+  robots: ['marimba', 'keys'], // instrument/robot voice per player if they don't record
   formation: null, // the dance pattern between rounds
   online: null, // { code, conn, me, room } when playing a duet across two phones
   started: false, // has this phone entered the garden yet?
@@ -1258,7 +1258,7 @@ function openSoundPreview() {
   let take = 0;
   let current = null;
   const instruments = VOICE_GROUPS.instruments;
-  let voices = ['guitar', 'keys'];
+  let voices = ['marimba', 'keys'];
   const play = async (style) => {
     current = style;
     panel.querySelectorAll('[data-style]').forEach((b) => b.classList.toggle('on', b.dataset.style === style));

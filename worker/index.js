@@ -25,7 +25,7 @@ const MAX_TEXT = 60; // characters per message (the game's box allows the same)
 const MAX_VOICE = 400_000; // a spoken message's recording, base64 (8 s of compressed audio is far less)
 const CODE = /^[A-Z0-9]{4,8}$/;
 // Starting picks for a new player: the first ones the other player isn't using.
-const DEFAULT_VOICES = ['guitar', 'keys', 'flute', 'violin', 'harp', 'marimba', 'cello', 'trumpet', 'ocarina', 'banjo'];
+const DEFAULT_VOICES = ['marimba', 'keys', 'flute', 'violin', 'harp', 'cello', 'trumpet', 'ocarina', 'banjo', 'steelpan'];
 const DEFAULT_COLORS = ['sky', 'peach', 'mint', 'lilac', 'rose', 'gold', 'coral', 'lime'];
 
 export default {
@@ -84,7 +84,7 @@ function cleanLetter(raw) {
   const word = (v) => (typeof v === 'string' && /^[a-z0-9]{1,20}$/.test(v) ? v : null);
   return {
     messages,
-    voice: word(raw.voice) || 'guitar',
+    voice: word(raw.voice) || 'marimba',
     color: word(raw.color) || 'sky',
     seed: Number.isInteger(raw.seed) ? raw.seed >>> 0 : Math.floor(Math.random() * 2 ** 31),
     replyTo: typeof raw.replyTo === 'string' && /^[a-z0-9]{8}$/.test(raw.replyTo) ? raw.replyTo : null,
