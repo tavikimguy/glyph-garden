@@ -67,11 +67,6 @@ const ROBOTS = {
 // Instrument "voices": the player's melody played on an instrument instead of sung.
 // make() builds the instrument; base = the pitch range it plays around.
 const INSTRUMENTS = {
-  electric: {
-    base: 220,
-    make: () => new Tone.PluckSynth({ attackNoise: 2, dampening: 5000, resonance: 0.985, volume: -13 }),
-    fx: () => [new Tone.Distortion(0.5), new Tone.Chorus(2, 3, 0.5).start()],
-  },
   keys: { base: 260, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 3, modulationIndex: 10, envelope: { attack: 0.005, decay: 1.2, sustain: 0.1, release: 1 }, modulationEnvelope: { attack: 0.002, decay: 0.5, sustain: 0, release: 0.5 }, volume: -10 }) },
   flute: { base: 520, make: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sine' }, envelope: { attack: 0.06, decay: 0.1, sustain: 0.8, release: 0.2 }, volume: -8 }), fx: () => [new Tone.Vibrato(5, 0.08)] },
   brass: { base: 230, make: () => new Tone.MonoSynth({ oscillator: { type: 'sawtooth' }, filter: { Q: 2 }, filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.6, baseFrequency: 300, octaves: 3 }, envelope: { attack: 0.03, decay: 0.1, sustain: 0.8, release: 0.15 }, volume: -12 }) },
@@ -103,7 +98,7 @@ export const VOICE_GROUPS = { instruments: Object.keys(INSTRUMENTS), voices: Obj
 // so handing out fresh objects piled up engines until the audio choked.
 const voices = {};
 export function robotVoice(name) {
-  if (!INSTRUMENTS[name] && !ROBOTS[name]) name = 'marimba'; // a voice we no longer have (guitar was retired)
+  if (!INSTRUMENTS[name] && !ROBOTS[name]) name = 'marimba'; // a voice we no longer have (guitar and electric were retired)
   voices[name] ??= INSTRUMENTS[name]
     ? { instrument: name, basePitch: INSTRUMENTS[name].base }
     : { robot: name, basePitch: (ROBOTS[name] || ROBOTS.velvet).base };
