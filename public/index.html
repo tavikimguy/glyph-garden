@@ -26,6 +26,7 @@
       <button data-mode="party">party</button>
       <button data-mode="diary">diary</button>
       <button data-mode="jam">jam</button>
+      <button data-mode="letter">letter</button>
     </div>
     <p id="mode-blurb"></p>
     <div id="mode-duet">
@@ -36,6 +37,9 @@
     </div>
     <div id="mode-diary" hidden>
       <button id="diary">open your diary</button>
+    </div>
+    <div id="mode-letter" hidden>
+      <button id="letter-write">write a letter</button>
     </div>
     <div id="mode-jam" hidden>
       <button id="host-jam">be the screen</button>
@@ -160,6 +164,15 @@
     <p id="waiting-note" class="quiet-text"></p>
   </section>
 
+  <ol id="interlude-lines" hidden></ol>
+
+  <!-- a letter link: open it to hear their song -->
+  <section id="letter-open" class="panel" hidden>
+    <p class="mode">letter</p>
+    <h2 id="letter-from"></h2>
+    <button id="letter-open-btn" hidden>open it</button>
+  </section>
+
   <section id="end" class="panel bottom encore" hidden>
     <p id="end-recipe" class="quiet-text"></p>
     <p id="end-secrets" class="secret"></p>
@@ -171,6 +184,8 @@
       <button id="replay">stop</button>
       <button id="save" class="quiet">save image</button>
       <button id="again" class="quiet">play again</button>
+      <button id="letter-send" hidden>send it ✉</button>
+      <button id="letter-reply" hidden>write back ✉</button>
     </div>
   </section>
 

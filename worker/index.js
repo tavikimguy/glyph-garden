@@ -40,6 +40,21 @@ export default {
       return env.ROOMS.getByName(code).fetch(request);
     }
 
+    // Letters: write 4 lines, send the link, they open it, hear the song, and write back.
+    // POST /api/letter → { id }   GET /api/letter/ID → the letter
+    if (url.pathname === '/api/letter' && request.method === 'POST') {
+      const letter = cleanLetter(await request.json().catch(() => null));
+      if (!letter) return new Response('bad letter', { status: 400 });
+      const id = letterId();
+      await env.ROOMS.getByName(`letter:${id}`).saveLetter(letter);
+      return Response.json({ id });
+    }
+    const letterMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})$/);
+    if (letterMatch) {
+      const letter = await env.ROOMS.getByName(`letter:${letterMatch[1]}`).getLetter();
+      return letter ? Response.json({ id: letterMatch[1], ...letter }) : new Response('no such letter', { status: 404 });
+    }
+
     // The word log. POST: count a one-screen game's message. GET: the top words (private).
     if (url.pathname === '/api/words') {
       const log = env.WORDS.getByName('global');
@@ -59,7 +74,38 @@ export default {
   },
 };
 
+// A letter: up to 4 short lines, the writer's voice + colour, the seed (so the glyphs
+// and the song come out the same for the reader), and which letter it answers.
+const LETTER_LINES = 4;
+function cleanLetter(raw) {
+  if (!raw || !Array.isArray(raw.messages)) return null;
+  const messages = raw.messages.slice(0, LETTER_LINES).map((m) => String(m ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)).filter(Boolean);
+  if (!messages.length) return null;
+  const word = (v) => (typeof v === 'string' && /^[a-z0-9]{1,20}$/.test(v) ? v : null);
+  return {
+    messages,
+    voice: word(raw.voice) || 'guitar',
+    color: word(raw.color) || 'sky',
+    seed: Number.isInteger(raw.seed) ? raw.seed >>> 0 : Math.floor(Math.random() * 2 ** 31),
+    replyTo: typeof raw.replyTo === 'string' && /^[a-z0-9]{8}$/.test(raw.replyTo) ? raw.replyTo : null,
+    sent: Date.now(),
+  };
+}
+function letterId() {
+  const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+  return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => abc[b % abc.length]).join('');
+}
+
 export class Room extends DurableObject {
+  // A letter lives in its own little Room (named letter:ID), just stored, no live connection.
+  async saveLetter(letter) {
+    await this.ctx.storage.put('letter', letter);
+  }
+
+  async getLetter() {
+    return (await this.ctx.storage.get('letter')) ?? null;
+  }
+
   // room = { mode, seed, players: [{ id, voice, color, entered } | null, …],
   //         order: [seats, in turn order] (set when a party starts), messages: [{ player, text }] }
   // The first person to open a room decides its mode (duet or party).

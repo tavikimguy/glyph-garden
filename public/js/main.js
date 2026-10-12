@@ -22,6 +22,7 @@ const MAX_CHARS = 60; // per message (the room enforces the same limit)
 const GAME_MODES = {
   duet: { perPlayer: 4 }, // take turns, 4 each
   diary: { perPlayer: 6, round: 2 }, // just you, 6 lines, a dance every 2
+  letter: { perPlayer: 4, round: 4 }, // just you, 4 lines, no dances: straight to the song, then send it
   // Party: no turns, max 2 each per round. The room decides when a round ends (once
   // everyone has a line in, or after 30 s) and tells every phone; 3 rounds (2 if 5+ people).
   party: { perRound: 2, free: true },
@@ -219,7 +220,8 @@ function startWriting() {
   show('write');
   $('write-who').textContent = isParty() ? 'say anything — into the void'
     : state.online ? 'your turn'
-      : state.mode === 'diary' ? 'dear diary…' : `${NAMES[player]}, say something`;
+      : state.mode === 'diary' ? 'dear diary…'
+        : state.mode === 'letter' ? (state.replyTo ? 'write back…' : 'dear you…') : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
   if (!wasWriting) {
     // a fresh message (in a party, a half-typed one survives other people's words)
@@ -398,8 +400,11 @@ function afterSend() {
   // A party round has 4 people's words: play a spread-out sample of ~16 syllables
   // (a bit of everyone) so the interlude stays around 4–5 seconds.
   const heard = isParty() && items.length > 16 ? items.filter((_, i) => i % Math.ceil(items.length / 16) === 0) : items;
+  // Duet: what each of you said, decoded, appears as it's heard.
+  const lines = state.mode === 'duet' ? showInterludeLines(state.messages.slice(from, n)) : null;
   const seconds = playInterlude(heard, state.banks, (round / rounds) * 0.7, (item) => {
     item.glyphs.forEach((g) => { g.flash = 1; });
+    lines?.get(item.message)?.classList.add('on');
   });
   // Two dances, max (see interludeDances for the rules).
   const { dances, golden } = interludeDances(state.messages.slice(from, n), round);
@@ -409,8 +414,26 @@ function afterSend() {
   }, seconds * 1000 * 0.45);
   setTimeout(() => {
     endFormation();
+    $('interlude-lines').hidden = true;
     startWriting();
   }, seconds * 1000);
+}
+
+// The round's messages as plain text, each in its writer's colour. Returns message → line,
+// so each line can fade in when its sounds start playing.
+function showInterludeLines(messages) {
+  const list = $('interlude-lines');
+  list.innerHTML = '';
+  const lines = new Map();
+  for (const m of messages) {
+    const li = document.createElement('li');
+    li.textContent = m.text;
+    li.style.color = rgb(COLORS[m.player]);
+    list.append(li);
+    lines.set(m, li);
+  }
+  list.hidden = false;
+  return lines;
 }
 
 function glyphsOf(m, wi) {
@@ -482,6 +505,10 @@ function showEncore() {
   $('end-lyrics').innerHTML = state.messages
     .map((m) => `<li style="color:${rgb(COLORS[m.player])}">${escapeHtml(m.text)}</li>`)
     .join('');
+  const letter = state.mode === 'letter';
+  $('letter-send').hidden = !letter || !!state.reading;
+  $('letter-reply').hidden = !letter || !state.reading;
+  $('again').hidden = letter;
 }
 
 // Stop the loop: the band stops, the letters drift off into space again.
@@ -502,8 +529,14 @@ function stopSong() {
   $('replay').textContent = 'play again';
 }
 
-function newDuet(seed = Math.floor(Math.random() * 2 ** 31)) {
+function newDuet(seed) {
+  resetGarden(seed);
+  startWriting();
+}
+
+function resetGarden(seed = Math.floor(Math.random() * 2 ** 31)) {
   stopAll();
+  $('interlude-lines').hidden = true;
   state.seed = seed;
   state.revealed = new Set();
   showKey();
@@ -520,7 +553,6 @@ function newDuet(seed = Math.floor(Math.random() * 2 ** 31)) {
   state.ripples = [];
   state.formation = null;
   setKey(songDNA([]));
-  startWriting();
 }
 
 // ───────────────────────── glyphs in space ─────────────────────────
@@ -732,6 +764,7 @@ function hueToRgb(h) {
 // A glyph's colour: its dye if a picture coloured it, else its player's colour.
 function tintOf(g, now) {
   if (state.formation?.golden && g.mode === 'form') return [255, 215, 120];
+  if (g.paint && g.mode === 'form') return g.paint; // a picture painting its parts (olive green, pit red)
   if (g.tint === 'rainbow') return hueToRgb((g.fi * 9 + now / 25) % 360);
   return g.tint || COLORS[g.player];
 }
@@ -743,6 +776,7 @@ function startFormation(name, slot, golden = false) {
   const msgSize = [];
   state.glyphs.forEach((g, i) => {
     g.fi = i;
+    g.paint = null; // only a picture paints; it sets this again every frame
     g.side = (isParty() ? g.player : state.order.indexOf(g.player)) % 2; // two groups, alternating
     g.fj = counts[g.side]++;
     g.fm = msgSize[g.msg] || 0;
@@ -1042,11 +1076,12 @@ $('local').addEventListener('click', () => {
   showLocalSetup();
 });
 function showLocalSetup() {
-  const diary = state.mode === 'diary';
-  $('local-mode').textContent = diary ? 'diary' : 'duet · one screen';
-  $('local-p2').hidden = diary;
-  $('player-0').textContent = diary ? 'you' : 'player 1';
-  $('begin').textContent = diary ? 'record your own voice instead' : 'record your own voices instead';
+  const solo = state.mode === 'diary' || state.mode === 'letter';
+  $('local-mode').textContent = state.mode === 'letter' ? (state.replyTo ? 'letter · writing back' : 'letter') : solo ? 'diary' : 'duet · one screen';
+  $('local-p2').hidden = solo;
+  $('player-0').textContent = solo ? 'you' : 'player 1';
+  $('begin').textContent = solo ? 'record your own voice instead' : 'record your own voices instead';
+  $('begin').hidden = state.mode === 'letter'; // a letter carries your words, not recordings
   showPickers();
   show('local-setup');
 }
@@ -1072,7 +1107,7 @@ function showPickers() {
     $(`colors-${p}`).querySelectorAll('button').forEach((btn) => {
       const mine = PALETTE[btn.dataset.color] === COLORS[p];
       btn.classList.toggle('on', mine);
-      btn.disabled = state.mode !== 'diary' && PALETTE[btn.dataset.color] === COLORS[1 - p]; // diary: no one else
+      btn.disabled = state.mode !== 'diary' && state.mode !== 'letter' && PALETTE[btn.dataset.color] === COLORS[1 - p]; // solo: no one else
     });
   });
 }
@@ -1136,6 +1171,104 @@ $('message').addEventListener('input', () => {
     state.online.conn.send({ type: 'typing' });
   }
 });
+// ───────────────────────── letters ─────────────────────────
+// Write 4 lines, hear them as a song, send the link. They open it, hear the same song
+// (same seed → same glyphs, same music), and write back the same way.
+
+$('letter-write').addEventListener('click', () => {
+  resetGarden();
+  state.mode = 'letter';
+  state.order = [0];
+  state.reading = null;
+  state.replyTo = null;
+  state.letterLink = null;
+  $('letter-send').textContent = 'send it ✉';
+  showLocalSetup();
+});
+
+$('letter-send').addEventListener('click', async () => {
+  const button = $('letter-send');
+  if (!state.letterLink) {
+    button.textContent = 'sending…';
+    try {
+      const res = await fetch('/api/letter', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          messages: state.messages.map((m) => m.text),
+          voice: state.robots[0],
+          color: Object.keys(PALETTE).find((name) => PALETTE[name] === COLORS[0]),
+          seed: state.seed,
+          replyTo: state.replyTo,
+        }),
+      });
+      if (!res.ok) throw new Error(res.status);
+      const { id } = await res.json();
+      state.letterLink = `${location.origin}${location.pathname}?letter=${id}`;
+    } catch {
+      button.textContent = 'couldn’t send — try again';
+      return;
+    }
+  }
+  try {
+    const text = state.replyTo ? 'i wrote back ✉' : 'i wrote you a letter ✉';
+    if (navigator.share) await navigator.share({ title: 'Glyph Garden', text, url: state.letterLink });
+    else {
+      await navigator.clipboard.writeText(state.letterLink);
+      button.textContent = 'link copied ✓';
+      return;
+    }
+  } catch { /* they closed the share sheet: the link's still ready */ }
+  button.textContent = 'send it again';
+});
+
+$('letter-reply').addEventListener('click', () => {
+  const replyTo = state.reading.id;
+  resetGarden();
+  state.mode = 'letter';
+  state.order = [0];
+  state.reading = null;
+  state.replyTo = replyTo;
+  state.letterLink = null;
+  $('letter-send').textContent = 'send it ✉';
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  // a different colour from theirs, to start with
+  if (COLORS[0] === PALETTE[state.theirColor]) COLORS[0] = Object.values(PALETTE).find((c) => c !== COLORS[0]);
+  showLocalSetup();
+});
+
+// Someone opened a letter link: fetch it, then wait for a tap (sound needs one).
+async function openLetter(id) {
+  show('letter-open');
+  $('letter-from').textContent = 'a letter is on its way…';
+  $('letter-open-btn').hidden = true;
+  try {
+    const res = await fetch(`/api/letter/${id}`);
+    if (!res.ok) throw new Error(res.status);
+    state.reading = await res.json();
+  } catch {
+    $('letter-from').textContent = 'this letter got lost — ask them to send it again';
+    return;
+  }
+  $('letter-from').textContent = state.reading.replyTo ? 'they wrote back ✉' : 'someone wrote you a letter ✉';
+  $('letter-open-btn').hidden = false;
+}
+
+$('letter-open-btn').addEventListener('click', async () => {
+  await startAudio();
+  const letter = state.reading;
+  resetGarden(letter.seed);
+  state.mode = 'letter';
+  state.order = [0];
+  state.theirColor = letter.color;
+  if (PALETTE[letter.color]) COLORS[0] = PALETTE[letter.color];
+  state.banks[0] = robotVoice(letter.voice);
+  state.started = true;
+  show(null);
+  for (const text of letter.messages) receive(0, text, true);
+  setTimeout(startFinale, 1500); // let the words fly in first
+});
+
 $('replay').addEventListener('click', () => {
   if (state.song) stopSong();
   else if (state.mode === 'jam') finishJam(state.jamTaps);
@@ -1364,13 +1497,14 @@ const BLURBS = {
   duet: 'Two people write to each other. The words get lost in translation — into drifting glyphs, into strange half-heard sounds — until, at the end, they come back as a song.',
   party: 'Up to 8 people, no turns: throw words into the void whenever you like. Once everyone has said something, the garden dances; after a few rounds, it all comes back as one song.',
   diary: 'Just you. Write a few lines to yourself and let them drift — at the end, they come back as a song.',
+  letter: 'Write someone 4 lines. No dances, straight to the song — then send it. They hear your song and write back the same way.',
   jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 45 seconds, your taps become a song.',
 };
 function pickMode(mode) {
   document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
   $('mode-blurb').textContent = BLURBS[mode];
-  for (const m of ['duet', 'party', 'diary', 'jam']) $(`mode-${m}`).hidden = m !== mode;
-  $('join-form').hidden = mode === 'diary';
+  for (const m of ['duet', 'party', 'diary', 'jam', 'letter']) $(`mode-${m}`).hidden = m !== mode;
+  $('join-form').hidden = mode === 'diary' || mode === 'letter';
   $('local').hidden = mode !== 'duet';
 }
 document.querySelector('.modes').addEventListener('click', (e) => { if (e.target.dataset.mode) pickMode(e.target.dataset.mode); });
@@ -1925,7 +2059,9 @@ window.visualViewport?.addEventListener('scroll', fitKeyboard);
 const linkParams = new URLSearchParams(location.search);
 const roomFromLink = linkParams.get('room');
 const screenFromLink = linkParams.get('screen');
-if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
+const letterFromLink = linkParams.get('letter');
+if (letterFromLink && /^[a-z0-9]{8}$/.test(letterFromLink)) openLetter(letterFromLink);
+else if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
 else if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
 
 state.cipher = makeCipher(state.seed);

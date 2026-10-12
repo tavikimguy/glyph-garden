@@ -67,10 +67,10 @@ const ROBOTS = {
 // Instrument "voices": the player's melody played on an instrument instead of sung.
 // make() builds the instrument; base = the pitch range it plays around.
 const INSTRUMENTS = {
-  guitar: { base: 200, make: () => new Tone.PluckSynth({ attackNoise: 1.2, dampening: 3800, resonance: 0.97, volume: -2 }) },
+  guitar: { base: 200, make: () => new Tone.PluckSynth({ attackNoise: 1.2, dampening: 3800, resonance: 0.97, volume: -11 }) },
   electric: {
     base: 220,
-    make: () => new Tone.PluckSynth({ attackNoise: 2, dampening: 5000, resonance: 0.985, volume: -6 }),
+    make: () => new Tone.PluckSynth({ attackNoise: 2, dampening: 5000, resonance: 0.985, volume: -13 }),
     fx: () => [new Tone.Distortion(0.5), new Tone.Chorus(2, 3, 0.5).start()],
   },
   keys: { base: 260, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 3, modulationIndex: 10, envelope: { attack: 0.005, decay: 1.2, sustain: 0.1, release: 1 }, modulationEnvelope: { attack: 0.002, decay: 0.5, sustain: 0, release: 0.5 }, volume: -10 }) },
@@ -81,10 +81,10 @@ const INSTRUMENTS = {
   musicbox: { base: 700, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 5, modulationIndex: 4, envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 0.8 }, modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }, volume: -10 }) },
   steelpan: { base: 400, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 2.5, modulationIndex: 3, envelope: { attack: 0.002, decay: 0.5, sustain: 0.1, release: 0.4 }, modulationEnvelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.2 }, volume: -8 }) },
   // plucked strings
-  harp: { base: 330, make: () => new Tone.PluckSynth({ attackNoise: 0.6, dampening: 6000, resonance: 0.995, volume: -2 }) },
-  banjo: { base: 300, make: () => new Tone.PluckSynth({ attackNoise: 3, dampening: 7000, resonance: 0.9, volume: -4 }), fx: () => [new Tone.Filter(250, 'highpass')] },
-  koto: { base: 400, make: () => new Tone.PluckSynth({ attackNoise: 1.5, dampening: 4500, resonance: 0.98, volume: -3 }), fx: () => [new Tone.Vibrato(4, 0.05)] },
-  sitar: { base: 250, make: () => new Tone.PluckSynth({ attackNoise: 2.5, dampening: 5000, resonance: 0.99, volume: -5 }), fx: () => [new Tone.Distortion(0.15), new Tone.Vibrato(6, 0.08)] },
+  harp: { base: 330, make: () => new Tone.PluckSynth({ attackNoise: 0.6, dampening: 6000, resonance: 0.995, volume: -10 }) },
+  banjo: { base: 300, make: () => new Tone.PluckSynth({ attackNoise: 3, dampening: 7000, resonance: 0.9, volume: -12 }), fx: () => [new Tone.Filter(250, 'highpass')] },
+  koto: { base: 400, make: () => new Tone.PluckSynth({ attackNoise: 1.5, dampening: 4500, resonance: 0.98, volume: -11 }), fx: () => [new Tone.Vibrato(4, 0.05)] },
+  sitar: { base: 250, make: () => new Tone.PluckSynth({ attackNoise: 2.5, dampening: 5000, resonance: 0.99, volume: -12 }), fx: () => [new Tone.Distortion(0.15), new Tone.Vibrato(6, 0.08)] },
   // mallets
   marimba: { base: 350, make: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 4, modulationIndex: 2, envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.5 }, modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }, volume: -8 }) },
   // bowed / blown / squeezed
@@ -229,6 +229,7 @@ export function setAmbient(on) {
 // how metallic, how long it rings, which octave, and whether it adds a second note.
 let chime = { octave: 0, interval: 0 };
 export function newChimes() {
+  if (!fx) return; // sound hasn't started yet: the first chimes are rolled when it does
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   fx.bell.set({
     harmonicity: pick([2, 3, 3.5, 4, 5.07, 7]),
