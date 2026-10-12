@@ -173,7 +173,7 @@ html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: v
   #write-hint:not(.show) { display: none; }
   body.composing #write .quiet-text { display: none; }
 }
-body.composing #write.panel.bottom { top: calc(env(safe-area-inset-top) + 9vh); bottom: auto; }
+body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bottom: auto; } /* a third of the way down: just above the keyboard, even on small iPhones */
 #mic.voiced { border-color: #ffd27a; color: #ffd27a; }
 
 .panel .back { position: absolute; top: 10px; left: 10px; margin: 0; padding: 4px 10px; font-size: 13px; }
