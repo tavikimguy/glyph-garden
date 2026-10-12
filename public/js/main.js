@@ -1253,7 +1253,13 @@ function openPatternViewer() {
 // Records a scripted duet as a portrait video (1080×1920): only the garden canvas and the
 // game's own sound. The lines fly in without the typing box ever showing; the finale
 // reveals and sings them. Keep the tab visible while it records (~1 minute).
+// letter: true = one writer, 4 lines, no dance, straight to the song (like letter mode).
 const FILM_SCRIPTS = {
+  promo: {
+    letter: true, voices: ['marimba'], colors: ['sky'],
+    lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'i’m still working on it but dm me for a link!'],
+    intro: 'a letter, written in glyphs…', outro: 'dm me for a link ✉',
+  },
   moon: { voices: ['marimba', 'flute'], colors: ['sky', 'rose'], lines: ['are you awake', 'yes, looking at the moon', 'it looks like a cat', 'meet me by the sea'] },
   pizza: { voices: ['keys', 'steelpan'], colors: ['gold', 'mint'], lines: ['i made you a pizza', 'with olives?', 'of course, and my heart', 'best day ever'] },
   spooky: { voices: ['musicbox', 'cello'], colors: ['lilac', 'peach'], lines: ['happy halloween', 'my dog is a pumpkin', 'spooky but cute', 'trick or treat!!'] },
@@ -1281,8 +1287,8 @@ async function startFilm(name, style) {
   Object.assign(P.canvas.style, { height: 'min(94vh, 960px)', width: 'auto', display: 'block', margin: '3vh auto 0' });
   $('pattern-viewer').hidden = true;
   resetGarden(hash(name) >>> 0);
-  state.mode = 'film';
-  state.order = [0, 1];
+  state.mode = script.letter ? 'letter' : 'film';
+  state.order = script.letter ? [0] : [0, 1];
   state.filming = { script, name };
   state.styleOverride = style || undefined;
   state.robots = [...script.voices];
@@ -1308,7 +1314,7 @@ async function startFilm(name, style) {
   state.filming.recorder = recorder;
   recorder.start(1000);
   state.phase = 'film';
-  state.filmCard = { text: 'glyph garden', sub: 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
+  state.filmCard = { text: 'glyph garden', sub: script.intro || 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
   setTimeout(() => filmNextLine(), 2600);
 }
 
@@ -1323,7 +1329,7 @@ function filmNextLine() {
 }
 
 function endFilm() {
-  state.filmCard = { text: 'glyph garden', sub: 'glyph-garden.tavikim.workers.dev', from: P.millis(), to: Infinity };
+  state.filmCard = { text: 'glyph garden', sub: state.filming.script.outro || 'glyph-garden.tavikim.workers.dev', from: P.millis(), to: Infinity };
   setTimeout(() => {
     stopSong();
     setTimeout(() => {
