@@ -1317,11 +1317,11 @@ const deviceId = (() => {
 const letterLink = (id) => `${location.origin}${location.pathname}?letter=${id}`;
 const isMine = (letter) => letter.author === deviceId || (!!me && letter.from === me.handle);
 
-// ── your inbox: a name + 4 secret words (no email, no password) ──
-// The words are made here, shown to you once, and kept on this phone so you stay signed in.
-// The server only keeps a salted fingerprint of them, to check them.
+// ── your inbox: a name + one secret word (no email, no password) ──
+// The word is picked here, shown to you, and kept on this phone so you stay signed in.
+// The server only keeps a salted fingerprint of it, to check it.
 const SECRET_WORDS = 'moss fern leaf seed root bloom petal stem vine reed pine oak elm ash birch maple cedar willow ivy clover daisy lily rose tulip poppy lotus iris violet lilac sage mint thyme basil olive plum pear peach apple berry cherry lemon lime mango melon fig date grape kiwi cocoa honey sugar salt pepper toast bread cake pie jam tea milk cream butter cheese soup rice bean corn wheat oat barley rain snow hail mist fog dew frost storm cloud sky sun moon star comet orbit nova dawn dusk noon night ember spark flame smoke coal stone pebble sand dune shore wave tide reef coral shell pearl river creek brook lake pond pool bay cove cliff hill peak vale glen field meadow grove forest cave canyon delta island marsh swamp desert tundra prairie fox wolf bear deer elk moose hare rabbit otter beaver badger mole owl hawk crow robin wren finch swan duck goose heron crane stork gull puffin seal whale shark squid crab shrimp eel trout salmon koi frog toad newt snail slug bee wasp ant moth beetle cricket firefly spider lizard turtle panda koala lemur sloth tiger lion lynx puma zebra camel llama yak goat sheep lamb pony horse mule donkey kitten puppy piglet chick lantern candle kettle teapot cup bowl spoon fork plate basket rope knot thread needle button ribbon velvet silk wool cotton linen paper ink quill brush paint chalk crayon marble domino puzzle kite yoyo drum flute harp bell gong chime piano violin cello banjo whistle anchor sail oar raft canoe ferry'.split(' ');
-const makePhrase = () => [...crypto.getRandomValues(new Uint8Array(4))].map((b) => SECRET_WORDS[b]).join(' ');
+const makePhrase = () => SECRET_WORDS[crypto.getRandomValues(new Uint8Array(1))[0]];
 const cleanName = (text) => text.trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '_');
 const cleanPhrase = (text) => text.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
 let me = (() => { try { return JSON.parse(localStorage.getItem('glyph-me') || 'null'); } catch { return null; } })();
@@ -1346,11 +1346,11 @@ async function renderLetterTab() {
   $('inbox-list').innerHTML = '<p class="quiet-text">opening your inbox…</p>';
   try {
     const res = await fetch('/api/inbox', { headers: signed() });
-    if (res.status === 401) { saveMe(null); inboxNote('those words stopped working — open your inbox again'); return renderLetterTab(); }
+    if (res.status === 401) { saveMe(null); inboxNote('your secret word stopped working — open your inbox again'); return renderLetterTab(); }
     const { inbox } = await res.json();
     const seen = seenCounts();
     $('inbox-list').innerHTML = inbox.length ? inbox.map((e) => {
-      const who = e.with.length ? e.with.map((h) => `@${escapeHtml(h)}`).join(', ') : 'just you';
+      const who = e.with.length ? e.with.map((h) => `@${escapeHtml(h)}`).join(', ') : 'via link'; // a letter sent as a link
       const theirs = e.lastFrom !== me.handle;
       const fresh = theirs && e.count > (seen[e.thread] || 0);
       const what = fresh ? 'new letter ✉' : theirs ? `“${escapeHtml(e.line)}”` : 'waiting for their reply';
@@ -1380,13 +1380,13 @@ $('login-form').addEventListener('submit', async (e) => {
   const handle = cleanName($('login-name').value);
   const phrase = cleanPhrase($('login-phrase').value);
   const res = await fetch('/api/user/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, phrase }) }).catch(() => null);
-  if (!res?.ok) return inboxNote(res?.status === 429 ? 'too many tries — wait 15 minutes' : 'that name and those words don’t match');
+  if (!res?.ok) return inboxNote(res?.status === 429 ? 'too many tries — wait an hour' : 'that name and that word don’t match');
   saveMe({ handle, phrase });
   inboxNote('');
   renderLetterTab();
 });
 function showPhrase() {
-  $('phrase-words').textContent = me.phrase.split(' ').join(' · ');
+  $('phrase-words').textContent = me.phrase.split(' ').join(' · '); // (one word now; older inboxes had four)
   $('phrase-box').hidden = false;
 }
 $('show-phrase').addEventListener('click', () => ($('phrase-box').hidden ? showPhrase() : ($('phrase-box').hidden = true)));
@@ -1394,19 +1394,21 @@ $('phrase-saved').addEventListener('click', () => { $('phrase-box').hidden = tru
 $('sign-out').addEventListener('click', () => {
   saveMe(null);
   $('phrase-box').hidden = true;
-  inboxNote('signed out — your 4 words open your inbox again');
+  inboxNote('signed out — your name and secret word open your inbox again');
   renderLetterTab();
 });
 $('letter-to-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const to = cleanName($('letter-to').value);
-  if (!to) return inboxNote('who’s it for? type their name');
-  const res = await fetch(`/api/user/${encodeURIComponent(to)}`).catch(() => null);
-  const { exists } = res?.ok ? await res.json() : {};
-  if (!exists) return inboxNote(`no one’s called @${to} yet — ask them to make an inbox`);
+  // No name: a letter you send as a link (they don't need an inbox). It still shows in yours.
+  if (to) {
+    const res = await fetch(`/api/user/${encodeURIComponent(to)}`).catch(() => null);
+    const { exists } = res?.ok ? await res.json() : {};
+    if (!exists) return inboxNote(`no one’s called @${to} yet — leave it blank to send a link instead`);
+  }
   inboxNote('');
   state.thread = null;
-  state.letterTo = to;
+  state.letterTo = to || null;
   writeLetter(null);
 });
 
@@ -1476,8 +1478,10 @@ $('letter-send').addEventListener('click', async () => {
       return;
     }
   }
-  // In an inbox conversation it's already in their inbox: no link to send (but it's there if you want it).
-  if (me && (state.letterTo || state.writingIn) && state.thread) {
+  // Written to a name (or back to one): it's already in their inbox, no link needed.
+  // A conversation with someone who has no inbox still gets the share sheet.
+  const otherNames = (state.thread?.people || []).filter((h) => h !== me?.handle);
+  if (me && state.thread && (state.letterTo || (state.writingIn && otherNames.length))) {
     button.textContent = state.letterTo ? `sent to @${state.letterTo} ✓` : 'sent ✓';
     return;
   }

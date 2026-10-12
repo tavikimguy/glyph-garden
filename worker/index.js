@@ -146,9 +146,9 @@ function cleanLetter(raw, author) {
     sent: Date.now(),
   };
 }
-// Names: 3–16 of a-z, 0-9, _. Secret words: 4 lowercase words with spaces.
+// Names: 3–16 of a-z, 0-9, _. Secret: one lowercase word (a few, for the earliest inboxes).
 const HANDLE = /^[a-z0-9_]{3,16}$/;
-const PHRASE = /^[a-z]{2,12}( [a-z]{2,12}){3}$/;
+const PHRASE = /^[a-z]{2,12}( [a-z]{2,12}){0,3}$/;
 
 // Who's asking? A signed request carries x-handle + x-phrase; null if missing or wrong.
 async function whoIs(request, env) {
@@ -219,7 +219,8 @@ export class Room extends DurableObject {
     return true;
   }
 
-  // 'ok' | 'bad' | 'none' | 'locked'. Ten wrong tries locks the name for 15 minutes.
+  // 'ok' | 'bad' | 'none' | 'locked'. With a one-word secret, guessing is the risk:
+  // 6 wrong tries locks the name for an hour.
   async checkUser(phrase) {
     const user = await this.ctx.storage.get('user');
     if (!user) return 'none';
@@ -229,7 +230,7 @@ export class Room extends DurableObject {
       return 'ok';
     }
     const fails = user.fails + 1;
-    await this.ctx.storage.put('user', { ...user, fails: fails >= 10 ? 0 : fails, lockedUntil: fails >= 10 ? Date.now() + 15 * 60_000 : 0 });
+    await this.ctx.storage.put('user', { ...user, fails: fails >= 6 ? 0 : fails, lockedUntil: fails >= 6 ? Date.now() + 60 * 60_000 : 0 });
     return 'bad';
   }
 
