@@ -180,9 +180,23 @@ body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bott
 #mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
 /* ── game modes ── */
-.modes { display: inline-flex; gap: 4px; margin: 0 0 10px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; }
-.modes button { margin: 0; padding: 5px 14px; border: none; color: var(--dim); font-size: 13px; }
-.modes button.on { background: var(--ink); color: var(--bg); }
+/* The mode switch: equal slots, and one pill that slides to the chosen one (--i = its slot). */
+.modes {
+  position: relative; display: grid; grid-template-columns: repeat(5, 1fr);
+  width: min(100%, 360px); margin: 0 auto 12px; padding: 3px;
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.modes::before {
+  content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 5);
+  border-radius: 999px; background: var(--ink);
+  transform: translateX(calc(var(--i, 0) * 100%)); transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.modes button {
+  position: relative; margin: 0; padding: 6px 0; border: none; border-radius: 999px;
+  color: var(--dim); font-size: 13px; text-align: center; transition: color 0.2s;
+}
+.modes button:hover { color: var(--ink); }
+.modes button.on { color: var(--bg); }
 #mode-blurb { min-height: 4.5em; }
 #party-list { list-style: none; padding: 0; margin: 6px 0 10px; font-size: 13px; }
 #party-list li { margin: 2px 0; }

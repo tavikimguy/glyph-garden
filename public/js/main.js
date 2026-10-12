@@ -1620,7 +1620,9 @@ const BLURBS = {
   jam: 'One big screen, everyone’s phones as instruments. Pick 4 symbols (every one is its own sound), then tap away and fire them onto the screen. No turns. After 45 seconds, your taps become a song.',
 };
 function pickMode(mode) {
-  document.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  const tabs = [...document.querySelectorAll('.modes button')];
+  tabs.forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  document.querySelector('.modes').style.setProperty('--i', tabs.findIndex((b) => b.dataset.mode === mode)); // slide the pill
   $('mode-blurb').textContent = BLURBS[mode];
   for (const m of ['duet', 'party', 'diary', 'jam', 'letter']) $(`mode-${m}`).hidden = m !== mode;
   $('join-form').hidden = mode === 'diary' || mode === 'letter';
