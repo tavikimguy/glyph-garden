@@ -1260,6 +1260,10 @@ const FILM_SCRIPTS = {
     lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'msg me for a link and give it a try!'],
     cards: false, // no title or end card: straight into the garden
   },
+  promoduet: {
+    voices: ['marimba', 'flute'], colors: ['sky', 'rose'], cards: false, // the same words, traded back and forth
+    lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'msg me for a link and give it a try!'],
+  },
   moon: { voices: ['marimba', 'flute'], colors: ['sky', 'rose'], lines: ['are you awake', 'yes, looking at the moon', 'it looks like a cat', 'meet me by the sea'] },
   pizza: { voices: ['keys', 'steelpan'], colors: ['gold', 'mint'], lines: ['i made you a pizza', 'with olives?', 'of course, and my heart', 'best day ever'] },
   spooky: { voices: ['musicbox', 'cello'], colors: ['lilac', 'peach'], lines: ['happy halloween', 'my dog is a pumpkin', 'spooky but cute', 'trick or treat!!'] },
