@@ -175,6 +175,12 @@ html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: v
 }
 body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bottom: auto; } /* a third of the way down: just above the keyboard, even on small iPhones */
 #mic.voiced { border-color: #ffd27a; color: #ffd27a; }
+.byline { font-size: 12px; color: var(--dim); margin: -6px 0 14px; }
+/* diary: past entries */
+#diary-past { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; max-height: 30vh; overflow-y: auto; }
+#diary-past button { margin: 0; padding: 7px 14px; font-size: 12px; text-align: left; display: flex; justify-content: space-between; gap: 10px; }
+#diary-past .when { color: var(--ink); white-space: nowrap; }
+#diary-past .first { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* inbox: name + words forms, the list of conversations */
 .fields { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .field { font: inherit; font-size: 16px; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; width: 11em; text-align: center; }

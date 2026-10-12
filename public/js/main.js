@@ -293,6 +293,7 @@ function receive(player, text, quiet = false, voice = null) {
   setKey(songDNA(state.messages)); // the space drifts into the conversation's key
   const landing = spawnMessage(msg, state.messages.length - 1);
   revealSecrets(msg, state.messages.length - 1, quiet ? 0 : landing + 400);
+  if (state.mode === 'diary' && !quiet) saveDiaryEntry();
   if (quiet) return;
   const n = state.messages.length;
   if (isParty() && !isRoundEnd(n)) {
@@ -538,6 +539,7 @@ function newDuet(seed) {
 
 function resetGarden(seed = Math.floor(Math.random() * 2 ** 31)) {
   stopAll();
+  state.diaryId = null; // the next diary line starts a new entry
   $('interlude-lines').hidden = true;
   state.seed = seed;
   state.revealed = new Set();
@@ -1421,6 +1423,65 @@ function openSoundPreview() {
   $('sp-stop').addEventListener('click', () => { stopSong(); current = null; panel.querySelectorAll('[data-style]').forEach((b) => b.classList.remove('on')); });
 }
 
+// ───────────────────────── the diary keeps everything ─────────────────────────
+// Every line is saved the moment you write it: on this phone, and (signed in) with your
+// inbox, so it follows you. The diary tab lists past entries by day; tap one to hear it again.
+const localDiary = () => { try { return JSON.parse(localStorage.getItem('glyph-diary') || '[]'); } catch { return []; } };
+function saveDiaryEntry() {
+  if (!state.diaryId) {
+    state.diaryId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    state.diaryAt = Date.now();
+  }
+  const entry = {
+    id: state.diaryId,
+    at: state.diaryAt,
+    lines: state.messages.map((m) => m.text),
+    voice: state.robots[0],
+    color: Object.keys(PALETTE).find((name) => PALETTE[name] === COLORS[0]) || 'sky',
+    seed: state.seed,
+  };
+  try { localStorage.setItem('glyph-diary', JSON.stringify([entry, ...localDiary().filter((e) => e.id !== entry.id)].slice(0, 1000))); } catch { /* full or private */ }
+  if (me) fetch('/api/diary', { method: 'POST', headers: { 'content-type': 'application/json', ...signed() }, body: JSON.stringify({ entry }) }).catch(() => {});
+}
+
+async function renderDiaryTab() {
+  let entries = localDiary();
+  if (me) {
+    // your account's diary + anything only on this phone (sent up so it's kept)
+    const res = await fetch('/api/diary', { headers: signed() }).catch(() => null);
+    if (res?.ok) {
+      const remote = (await res.json()).entries;
+      const known = new Set(remote.map((e) => e.id));
+      const onlyHere = entries.filter((e) => !known.has(e.id));
+      onlyHere.forEach((entry) => fetch('/api/diary', { method: 'POST', headers: { 'content-type': 'application/json', ...signed() }, body: JSON.stringify({ entry }) }).catch(() => {}));
+      entries = [...remote, ...onlyHere];
+    }
+  }
+  entries.sort((a, b) => b.at - a.at);
+  state.diaryEntries = entries;
+  const day = (t) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  $('diary-past').innerHTML = entries.length
+    ? `<p class="quiet-text">your diary${me ? '' : ' (on this phone — make an inbox in letters to keep it everywhere)'}</p>${entries.map((e, i) => `<button data-i="${i}"><span class="when">${day(e.at)}</span><span class="first">“${escapeHtml(e.lines[0])}”</span></button>`).join('')}`
+    : '';
+}
+$('diary-past').addEventListener('click', (e) => { const i = e.target.closest('button')?.dataset.i; if (i !== undefined) playDiary(state.diaryEntries[Number(i)]); });
+
+// Hear an old entry: its lines fly in, then its song plays.
+async function playDiary(entry) {
+  await startAudio();
+  resetGarden(entry.seed || undefined);
+  state.mode = 'diary';
+  state.order = [0];
+  state.diaryId = entry.id; // (reading only; nothing new is added to it)
+  if (PALETTE[entry.color]) COLORS[0] = PALETTE[entry.color];
+  state.robots = [entry.voice];
+  state.banks[0] = robotVoice(entry.voice);
+  state.started = true;
+  show(null);
+  for (const text of entry.lines) receive(0, text, true);
+  setTimeout(startFinale, 1500);
+}
+
 // ───────────────────────── letters ─────────────────────────
 // A letter is a conversation with one link. You write 4 lines, hear them as a song, and
 // send the link; they open it, hear the same song (same seed → same glyphs, same music) and
@@ -1999,6 +2060,7 @@ function pickMode(mode) {
   $('mode-blurb').textContent = BLURBS[mode];
   for (const m of ['duet', 'party', 'diary', 'jam', 'letter']) $(`mode-${m}`).hidden = m !== mode;
   if (mode === 'letter') renderLetterTab();
+  if (mode === 'diary') renderDiaryTab();
   $('join-form').hidden = mode === 'diary' || mode === 'letter';
   $('local').hidden = mode !== 'duet';
 }
@@ -2007,6 +2069,7 @@ pickMode('duet');
 
 // Diary: the one-screen setup, with just you.
 $('diary').addEventListener('click', () => {
+  state.diaryId = null; // a new entry
   state.mode = 'diary';
   state.order = [0];
   showLocalSetup();

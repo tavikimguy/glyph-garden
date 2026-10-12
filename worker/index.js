@@ -68,6 +68,21 @@ export default {
       return Response.json({ handle: me, inbox: await env.ROOMS.getByName(`user:${me}`).getInbox() });
     }
 
+    // Your diary, kept with your inbox (signed in), so it follows you to any phone.
+    //   GET  /api/diary (signed) → entries   POST /api/diary (signed) { entry } → saved
+    if (url.pathname === '/api/diary') {
+      const me = await whoIs(request, env);
+      if (!me) return new Response('sign in', { status: 401 });
+      const user = env.ROOMS.getByName(`user:${me}`);
+      if (request.method === 'POST') {
+        const entry = cleanDiary((await request.json().catch(() => null))?.entry);
+        if (!entry) return new Response('bad entry', { status: 400 });
+        await user.saveDiary(entry);
+        return Response.json({ ok: true });
+      }
+      return Response.json({ entries: await user.getDiary() });
+    }
+
     // Letters: one link per conversation (a thread). You write 4 lines and send the link;
     // they write back into the same thread; anyone with the link can come back and see it all.
     //   POST /api/letter          { letter, author } → a new thread, { id }
@@ -193,6 +208,18 @@ async function fingerprint(salt, phrase) {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// A diary entry: its lines (up to 6), when it was written, and the voice/colour/seed to replay it.
+function cleanDiary(raw) {
+  if (!raw || typeof raw.id !== 'string' || !/^[a-z0-9]{6,24}$/.test(raw.id) || !Array.isArray(raw.lines)) return null;
+  const lines = raw.lines.slice(0, 6).map((l) => String(l ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)).filter(Boolean);
+  if (!lines.length) return null;
+  const word = (v) => (typeof v === 'string' && /^[a-z0-9]{1,20}$/.test(v) ? v : null);
+  return {
+    id: raw.id, lines, at: Number.isFinite(raw.at) ? raw.at : Date.now(),
+    voice: word(raw.voice) || 'marimba', color: word(raw.color) || 'sky', seed: Number.isInteger(raw.seed) ? raw.seed >>> 0 : 0,
+  };
+}
+
 function letterId() {
   const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
   return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => abc[b % abc.length]).join('');
@@ -261,6 +288,17 @@ export class Room extends DurableObject {
     const fails = user.fails + 1;
     await this.ctx.storage.put('user', { ...user, fails: fails >= 6 ? 0 : fails, lockedUntil: fails >= 6 ? Date.now() + 60 * 60_000 : 0 });
     return 'bad';
+  }
+
+  async getDiary() {
+    return (await this.ctx.storage.get('diary')) || [];
+  }
+
+  async saveDiary(entry) {
+    const diary = (await this.getDiary()).filter((e) => e.id !== entry.id);
+    diary.unshift(entry);
+    diary.sort((a, b) => b.at - a.at);
+    await this.ctx.storage.put('diary', diary.slice(0, 1000));
   }
 
   async getInbox() {
