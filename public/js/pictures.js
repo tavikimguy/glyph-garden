@@ -254,19 +254,21 @@ const DRAWINGS = {
     line([0.7, -0.3], [0.75, -0.15], [0.7, -0.08], [0.65, -0.15], [0.7, -0.3]),
   ], [C.orange, C.ink, C.ink, C.ink, C.orange, C.cream, C.orange, C.orange, C.orange, C.orange, C.orange, C.red, C.yellow]),
   shaymin: shape([
-    arc(0, 0.2, 0.68, 0.38, -0.15, Math.PI * 1.15, 24), // white belly and face; the green back covers the top
+    // white hedgehog body: from where the green back starts, down the face to a little
+    // pointed snout, under the chin, along the belly, and up to the back of the green
+    line([-0.52, 0.18], [-0.66, 0.24], [-0.88, 0.33], [-0.72, 0.42], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
     tufts(Array.from({ length: 13 }, (_, k) => { // the grassy back, with little spiky tufts
       const a = Math.PI * (1.02 + (k / 12) * 0.96);
       return [0.1 + Math.cos(a) * 0.62, 0.2 + Math.sin(a) * 0.52];
     }), 0.1, 0.2, 0.13),
-    // the flower: a simple pink starburst
+    // the flower: a pink starburst (rays start just off the middle, so no glyphs pile up there)
     ...Array.from({ length: 5 }, (_, k) => {
       const a = -Math.PI / 2 + (k / 5) * TAU;
-      return [[-0.42, -0.22], [-0.42 + Math.cos(a) * 0.22, -0.22 + Math.sin(a) * 0.22]];
+      return [[-0.42 + Math.cos(a) * 0.05, -0.22 + Math.sin(a) * 0.05], [-0.42 + Math.cos(a) * 0.22, -0.22 + Math.sin(a) * 0.22]];
     }),
-    arc(-0.5, 0.12, 0.05, 0.07, 0, TAU, 8), // eye
-    line([-0.62, 0.27], [-0.55, 0.3]), // mouth
-    ...[-0.42, -0.18, 0.14, 0.38].map((x) => line([x, 0.5], [x, 0.74])), // four little legs
+    arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8), // eye
+    arc(-0.88, 0.33, 0.03, 0.03, 0, TAU, 6), // nose
+    ...[-0.38, -0.14, 0.14, 0.38].map((x) => line([x, 0.58], [x, 0.84])), // four little legs
   ], [C.white, C.green, C.pink, C.pink, C.pink, C.pink, C.pink, C.leaf, C.ink, C.white, C.white, C.white, C.white]),
   dog: shape([
     arc(0, 0, 0.5, 0.5),
@@ -401,7 +403,10 @@ const MOTION = {
     if (x > 0.56 && y < 0) return [x + Math.sin(t * 9 + y * 10) * 0.04, y * (1 + Math.sin(t * 11) * 0.12)]; // the tail flame flickers
     return [x + Math.sin(t * 1.2) * 0.05, y];
   },
-  shaymin: (x, y, t) => [x + Math.sin(t * 0.7) * 0.15, y - Math.abs(Math.sin(t * 1.8)) * 0.08],
+  shaymin: (x, y, t) => {
+    const step = y > 0.6 ? Math.sin(t * 6 + x * 9) * 0.04 : 0; // little legs trot
+    return [x + Math.sin(t * 0.7) * 0.15 + step, y - Math.abs(Math.sin(t * 1.8)) * 0.06];
+  },
   dog: (x, y, t) => {
     const ear = Math.abs(x) > 0.4 ? Math.sin(t * 6) * 0.06 : 0; // floppy ears flap
     const tilt = Math.sin(t * 1.1) * 0.12;
