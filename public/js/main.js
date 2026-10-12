@@ -12,7 +12,7 @@ import {
   initAudio, plink, bump, playInterlude, playFinale, previewClip, previewVoice, setClarity, setAmbient, stopAll,
   VOICE_GROUPS, robotVoice, setKey, newChimes, startJamBacking, jamTap, jamTapLocal, playJamSong, jamSoundIndex,
 } from './audio.js';
-import { songDNA, messageMood, STYLES } from './songdna.js';
+import { songDNA, messageMood, STYLES, isSecretWord } from './songdna.js';
 import { promptFor } from './prompts.js';
 import { connect, newCode } from './online.js';
 
@@ -292,7 +292,7 @@ function receive(player, text, quiet = false, voice = null) {
   if (voice || late) attachVoice(msg, voice || late);
   setKey(songDNA(state.messages)); // the space drifts into the conversation's key
   const landing = spawnMessage(msg, state.messages.length - 1);
-  revealLetter(text, quiet ? 0 : landing + 400);
+  revealSecrets(msg, state.messages.length - 1, quiet ? 0 : landing + 400);
   if (quiet) return;
   const n = state.messages.length;
   if (isParty() && !isRoundEnd(n)) {
@@ -316,37 +316,25 @@ function beginRoundEnd() {
   return 'wait';
 }
 
-// Each message unlocks one letter of the cipher for both players: its most
-// common letter that isn't known yet. Same order on both phones → same letters.
-function revealLetter(text, delay) {
-  const counts = {};
-  for (const ch of text.toLowerCase()) if (ch >= 'a' && ch <= 'z' && !state.revealed.has(ch)) counts[ch] = (counts[ch] || 0) + 1;
-  const letter = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))[0];
-  if (!letter) return;
-  state.revealed.add(letter);
-  const at = P.millis() + delay;
-  for (const g of state.glyphs) {
-    if (g.ch.toLowerCase() === letter && g.revealAt === null) {
-      g.revealAt = at;
-    }
-  }
-  setTimeout(() => {
-    glyphsWithLetter(letter).forEach((g) => { g.flash = 1; });
-    if (delay) plink(state.cipher[letter]);
-    showKey(letter);
-  }, delay);
-}
-
-function glyphsWithLetter(letter) {
-  return state.glyphs.filter((g) => g.ch.toLowerCase() === letter);
+// Everything stays in glyphs, except secret words: write one ("rain", "cat", "pizza"…) and,
+// once it lands, the whole word turns back into its real letters, glows, and stays readable.
+function revealSecrets(msg, m, delay) {
+  msg.words.forEach((w, wi) => {
+    const word = w.word.toLowerCase().replace(/[^a-z']/g, '');
+    if (!isSecretWord(word)) return;
+    const at = P.millis() + delay;
+    glyphsOf(m, wi).forEach((g, k) => { g.revealAt = at + k * 60; });
+    setTimeout(() => {
+      glyphsOf(m, wi).forEach((g) => { g.flash = 1; });
+      if (delay) plink(word);
+    }, delay);
+  });
 }
 
 // The little key in the corner: every glyph you've learned so far.
-function showKey(fresh) {
-  $('key').hidden = state.revealed.size === 0;
-  $('key').innerHTML = [...state.revealed]
-    .map((l) => `<span class="${l === fresh ? 'new' : ''}">${escapeHtml(state.cipher[l])}${TEXT_STYLE}<b>${l}</b></span>`)
-    .join('');
+// The corner key of learned letters is retired: secret words reveal whole, in place.
+function showKey() {
+  $('key').hidden = true;
 }
 
 // Returns 'wait' if that message finished a round (so a dance/turn change is coming).
@@ -620,7 +608,7 @@ function spawnMessage(msg, m) {
       quietUntil: now + order * 45 + 2000, // no chimes while the spray is flying
       seed: Math.random() * 1000,
       mood: messageMood(msg.text), // how this message's glyphs move: excited / happy / sad / calm
-      revealAt: state.revealed.has(ch.toLowerCase()) ? now : null, // letter already known? show it
+      revealAt: null, // stays a glyph (unless it's part of a secret word: see revealSecrets)
     });
   });
   return order * 45 + 1400;

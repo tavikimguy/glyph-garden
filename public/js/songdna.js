@@ -173,6 +173,9 @@ const SECRETS = {
 };
 const CATEGORIES = ['lead', 'pad', 'kit', 'bass', 'arp', 'delayTime'];
 
+// Is this word a secret (it changes the song, or draws a picture)? The garden reveals it.
+export const isSecretWord = (word) => !!SECRETS[word] || PICTURE_WORD_SET.has(word);
+
 function applySecret(d, recipe, claimed) {
   for (const key of CATEGORIES) {
     if (!recipe[key]) continue;
