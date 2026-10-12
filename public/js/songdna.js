@@ -5,6 +5,8 @@
 //   energy (!, CAPS, short bursts, party words) → tempo + busier drums
 //   the exact text  → a seed that picks key, chords, kit, beat, instruments
 //   secret words    → hidden twists (and the end screen counts how many you found)
+//   style           → the top gene: a flavour of the garden (lo-fi, bossa, waltz…) that
+//                     sets tempo, groove, space and texture; the dice vary things inside it
 
 import { hash } from './glyphs.js';
 import { PICTURE_WORDS } from './pictures.js';
@@ -36,6 +38,66 @@ const KITS = {
   pulse: ['four'],
 };
 const LEADS = ['mallet', 'bells', 'kalimba', 'glass', 'chip', 'harp'];
+
+// Styles: flavours of the same garden (the rain, the plinks and the reverb stay), each a
+// matching bundle so a song has a clear identity instead of an average of random picks.
+//   bpm      tempo range (energy picks low or high inside it)
+//   patterns drum beats · padMode: hold (long chords) | stab (short comping) | skank (offbeat) | waltz (pah-pah)
+//   bassStyle the bass rhythm (roots = the original) · space: reverb amount 0–1
+//   tone     muffle (lo-fi) | crunch (chip) · meter 3 = waltz time
+// A list left out = anything goes (the original garden behaviour).
+export const STYLES = {
+  garden: {}, // the original: everything rolled freely
+  drift: {
+    bpm: [64, 78], kits: ['tick', 'soft'], patterns: ['sparse'], leads: ['glass', 'bells'], pads: ['choir', 'warm', 'strings'],
+    basses: ['sub', 'round'], arps: ['wide', 'updown'], arpRate: 2, swing: [0, 0], space: 0.75, quietDrums: true, echo: 0.15,
+  },
+  lofi: {
+    bpm: [70, 88], kits: ['soft'], patterns: ['broken', 'half'], leads: ['mallet', 'kalimba'], pads: ['warm', 'organ'],
+    basses: ['round'], arps: ['broken', 'alberti'], arpRate: 2, swing: [0.22, 0.32], space: 0.35, tone: 'muffle', bassStyle: 'walk',
+  },
+  pulse: {
+    bpm: [104, 120], kits: ['pulse'], patterns: ['four'], leads: ['bells', 'glass', 'chip'], pads: ['strings'],
+    basses: ['buzz', 'pluck'], arps: ['up', 'updown'], arpRate: 1, swing: [0, 0], space: 0.55, bassStyle: 'pulse',
+  },
+  bossa: {
+    bpm: [118, 132], kits: ['soft', 'tick'], patterns: ['bossa'], leads: ['harp', 'kalimba', 'mallet'], pads: ['warm'],
+    basses: ['round', 'pluck'], arps: ['alberti', 'broken'], arpRate: 2, swing: [0.06, 0.14], space: 0.3, padMode: 'stab', bassStyle: 'bossa',
+  },
+  chip: {
+    bpm: [138, 156], kits: ['glitch', 'tick'], patterns: ['broken', 'four'], leads: ['chip'], pads: ['organ'],
+    basses: ['pluck'], arps: ['up', 'down', 'updown'], arpRate: 1, swing: [0, 0], space: 0.15, tone: 'crunch', bassStyle: 'pulse',
+  },
+  waltz: {
+    bpm: [92, 108], kits: ['soft', 'tick'], patterns: ['waltz'], leads: ['bells', 'kalimba', 'glass'], pads: ['warm', 'strings'],
+    basses: ['round'], arps: ['up', 'updown'], arpRate: 2, swing: [0, 0], space: 0.55, padMode: 'waltz', bassStyle: 'waltz', meter: 3,
+  },
+  trap: {
+    bpm: [136, 150], kits: ['deep'], patterns: ['trap'], leads: ['glass', 'bells'], pads: ['choir', 'strings'],
+    basses: ['sub'], arps: ['wide', 'down'], arpRate: 2, swing: [0, 0], space: 0.5, bassStyle: '808', hatRolls: true, darker: 1,
+  },
+  dub: {
+    bpm: [70, 80], kits: ['deep', 'soft'], patterns: ['dub'], leads: ['mallet', 'glass'], pads: ['organ'],
+    basses: ['sub', 'round'], arps: ['wide'], arpRate: 2, swing: [0.05, 0.12], space: 0.45, echo: 0.25, padMode: 'skank', bassStyle: 'dub',
+  },
+};
+// How likely each style is, by the conversation's energy (calm · normal · hype).
+const STYLE_ODDS = {
+  calm: { garden: 3, drift: 3, lofi: 3, waltz: 2, dub: 2, bossa: 1 },
+  normal: { garden: 3, lofi: 2, bossa: 3, dub: 2, pulse: 2, waltz: 1, drift: 1 },
+  hype: { garden: 2, pulse: 3, chip: 2, trap: 2, bossa: 1 },
+};
+// Words that push a song toward a style (the first one said wins).
+const STYLE_WORDS = {
+  party: 'pulse', dance: 'pulse', club: 'pulse', disco: 'pulse',
+  sleep: 'drift', sleepy: 'drift', dream: 'drift', dreams: 'drift', space: 'drift', float: 'drift',
+  chill: 'lofi', study: 'lofi', coffee: 'lofi', homework: 'lofi', cozy: 'lofi',
+  beach: 'bossa', summer: 'bossa', vacation: 'bossa', brazil: 'bossa', sunny: 'bossa',
+  game: 'chip', games: 'chip', gaming: 'chip', nintendo: 'chip', pixel: 'chip', videogame: 'chip', videogames: 'chip',
+  halloween: 'waltz', spooky: 'waltz', ballroom: 'waltz', waltz: 'waltz',
+  fire: 'trap', lit: 'trap', hard: 'trap', bass: 'trap',
+  island: 'dub', reggae: 'dub', jamaica: 'dub', irie: 'dub',
+};
 const PADS = ['warm', 'strings', 'choir', 'organ'];
 const BASSES = ['round', 'sub', 'buzz', 'pluck'];
 const ARPS = ['up', 'down', 'updown', 'alberti', 'broken', 'wide'];
@@ -127,7 +189,9 @@ function rng(seed) {
   };
 }
 
-export function songDNA(messages) {
+// options.style forces a style (the sound preview); options.jam leaves out waltz time
+// (a jam's loops are built on 4-beat bars).
+export function songDNA(messages, options = {}) {
   const text = messages.map((m) => m.text).join(' / ');
   const words = text.toLowerCase().match(/[a-z']+/g) || [];
   const rand = rng(hash(text));
@@ -146,22 +210,41 @@ export function songDNA(messages) {
   if (avgLen < 18) energy += 3; // quick back-and-forth
   if (avgLen > 45) energy -= 3; // long, thoughtful messages
 
+  // The style comes first: a word that pushes one, or the dice weighted by energy.
+  const band = energy >= 6 ? 'hype' : energy >= 2 ? 'normal' : 'calm';
+  const pushed = words.map((w) => STYLE_WORDS[w]).find(Boolean);
+  const odds = Object.entries(STYLE_ODDS[band]).filter(([name]) => !(options.jam && STYLES[name].meter === 3));
+  let roll = rand() * odds.reduce((n, [, w]) => n + w, 0);
+  const rolled = odds.find(([, w]) => (roll -= w) < 0)?.[0] || 'garden';
+  let styleName = options.style || pushed || rolled;
+  if (options.jam && STYLES[styleName].meter === 3) styleName = 'garden';
+  const st = STYLES[styleName];
+  const within = (list, all) => choose(list || all);
+
   const d = {
     seed: hash(text),
+    style: styleName,
     root: Math.floor(rand() * 12),
     progression: choose(PROGRESSIONS),
-    kit: choose(Object.keys(KITS)),
-    lead: choose(LEADS),
-    pad: choose(PADS),
-    bass: choose(BASSES),
-    arp: choose(ARPS),
-    arpRate: rand() < 0.5 ? 1 : 2, // 16ths or 8ths
-    swing: rand() < 0.4 ? 0.12 + rand() * 0.18 : 0,
+    kit: within(st.kits, Object.keys(KITS)),
+    lead: within(st.leads, LEADS),
+    pad: within(st.pads, PADS),
+    bass: within(st.basses, BASSES),
+    arp: within(st.arps, ARPS),
+    arpRate: st.arpRate || (rand() < 0.5 ? 1 : 2), // 16ths or 8ths
+    swing: st.swing ? st.swing[0] + rand() * (st.swing[1] - st.swing[0]) : rand() < 0.4 ? 0.12 + rand() * 0.18 : 0,
     delayTime: choose(['8n', '8n.', '4n', '16n.']),
-    delayFeedback: 0.2 + rand() * 0.25,
+    delayFeedback: 0.2 + rand() * 0.25 + (st.echo || 0),
+    meter: st.meter || 4,
+    padMode: st.padMode || 'hold',
+    bassStyle: st.bassStyle || 'roots',
+    space: st.space ?? 0.5,
+    tone: st.tone || null,
+    hatRolls: !!st.hatRolls,
+    quietDrums: !!st.quietDrums,
     rain: 0.4 + rand() * 0.6,
     brighter: 0,
-    darker: 0,
+    darker: st.darker || 0,
     bpmShift: 0,
     secrets: [],
     layers: {}, // extra sounds from secrets that stacked on top (e.g. a second lead)
@@ -181,9 +264,16 @@ export function songDNA(messages) {
   d.mode = ladder[Math.max(0, Math.min(ladder.length - 1, step))];
 
   // Energy → tempo; the kit's beat comes from the kit's own repertoire.
-  const bpm = energy >= 6 ? 128 + rand() * 12 : energy >= 2 ? 110 + rand() * 14 : 92 + rand() * 14;
-  d.bpm = Math.round(Math.max(80, Math.min(150, bpm + d.bpmShift)));
-  d.pattern = choose(KITS[d.kit]);
+  // Energy → tempo: the original bands, or (in a style) low / middle / high inside its range.
+  let bpm;
+  if (st.bpm) {
+    const [lo, hi] = st.bpm;
+    const at = band === 'hype' ? 0.7 : band === 'normal' ? 0.4 : 0.1;
+    bpm = lo + (hi - lo) * Math.min(1, at + rand() * 0.3);
+  } else bpm = energy >= 6 ? 128 + rand() * 12 : energy >= 2 ? 110 + rand() * 14 : 92 + rand() * 14;
+  const [floor, ceiling] = st.bpm ? [st.bpm[0] - 10, st.bpm[1] + 10] : [80, 150];
+  d.bpm = Math.round(Math.max(floor, Math.min(ceiling, bpm + d.bpmShift)));
+  d.pattern = st.patterns ? choose(st.patterns) : choose(KITS[d.kit] || KITS.soft);
   if (energy >= 6 && d.arpRate === 2 && rand() < 0.6) d.arpRate = 1;
 
   d.keyName = `${NOTE_NAMES[d.root]} ${d.mode}`;

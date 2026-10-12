@@ -12,7 +12,7 @@ import {
   initAudio, plink, bump, playInterlude, playFinale, previewClip, previewVoice, setClarity, setAmbient, stopAll,
   VOICE_GROUPS, robotVoice, setKey, newChimes, startJamBacking, jamTap, jamTapLocal, playJamSong, jamSoundIndex,
 } from './audio.js';
-import { songDNA, messageMood } from './songdna.js';
+import { songDNA, messageMood, STYLES } from './songdna.js';
 import { promptFor } from './prompts.js';
 import { connect, newCode } from './online.js';
 
@@ -456,7 +456,7 @@ function startFinale() {
     g.decodeAt = null;
   }
   startFormation(danceFor('pattern', 3), 'finale');
-  state.dna = songDNA(state.messages);
+  state.dna = songDNA(state.messages, { style: state.styleOverride }); // (the override is only the sound preview's)
   const song = playFinale(state.messages, state.banks, state.dna, {
     onMessage(m, pass) {
       if (state.focus >= 0) decode(state.focus, Infinity);
@@ -492,6 +492,7 @@ function decode(m, wi) {
 
 // The song card, shown while the song keeps looping.
 function showEncore() {
+  if (state.preview) return; // the sound preview keeps its own panel
   state.phase = 'encore';
   show('end');
   $('end-lyrics-box').hidden = false;
@@ -499,7 +500,7 @@ function showEncore() {
   const d = state.dna;
   const secrets = d.secrets.length;
   $('end-recipe').textContent = [
-    `${d.keyName} · ${d.feel}`, `${d.bpm} bpm`, `${d.kit} drums, ${d.pattern} beat`, `${d.lead} + ${d.pad}`,
+    `${d.style}`, `${d.keyName} · ${d.feel}`, `${d.bpm} bpm`, `${d.kit} drums, ${d.pattern} beat`, `${d.lead} + ${d.pad}`,
   ].join('  ·  ');
   $('end-secrets').textContent = secrets ? `✶ you found ${secrets} secret word${secrets > 1 ? 's' : ''}` : '';
   $('end-lyrics').innerHTML = state.messages
@@ -1231,6 +1232,58 @@ function openPatternViewer() {
   });
 }
 
+// ───────────────────────── sound preview (dev only: /?sounds on localhost) ─────────────────────────
+// Hear every style with the same words: a real finale (glyphs, voices, band), style forced.
+// "new words" swaps the lines and the two instruments, so you hear how the dice vary inside a style.
+const DEMO_LINES = [
+  ['hey are you up', 'yeah just thinking about stuff', 'like what', 'how fast this year went'],
+  ['i made soup today', 'what kind', 'the green kind', 'save me some please'],
+  ['look outside right now', 'the sky is pink', 'wish you were here', 'me too honestly'],
+  ['did you get my note', 'i did it made me smile', 'good thats the point', 'call me later ok'],
+];
+function openSoundPreview() {
+  resetGarden(777);
+  state.mode = 'duet';
+  state.order = [0, 1];
+  state.phase = 'sounds';
+  state.preview = true;
+  show(null);
+  const names = Object.keys(STYLES);
+  const panel = document.createElement('div');
+  panel.id = 'pattern-viewer';
+  panel.innerHTML = `<p class="quiet-text">sound styles · tap one to hear it (loops) · <button id="sp-words">new words</button> <button id="sp-stop">stop</button></p>
+    <div>${names.map((n) => `<button data-style="${n}">${n}</button>`).join('')}</div>
+    <p id="sp-info" class="quiet-text" style="margin-top:6px"></p>`;
+  document.body.append(panel);
+  let take = 0;
+  let current = null;
+  const instruments = VOICE_GROUPS.instruments;
+  let voices = ['guitar', 'keys'];
+  const play = async (style) => {
+    current = style;
+    panel.querySelectorAll('[data-style]').forEach((b) => b.classList.toggle('on', b.dataset.style === style));
+    await startAudio();
+    resetGarden(1000 + take);
+    state.phase = 'sounds';
+    state.robots = [...voices];
+    state.banks = voices.map(robotVoice);
+    DEMO_LINES[take % DEMO_LINES.length].forEach((text, i) => receive(i % 2, text, true));
+    state.styleOverride = style;
+    startFinale();
+    const d = state.dna;
+    $('sp-info').textContent = [`${d.style}`, `${d.bpm} bpm`, `${d.keyName} (${d.feel})`, `${d.meter}/4`, `${d.kit} drums, ${d.pattern} beat`,
+      `${d.lead} lead, ${d.pad} pad (${d.padMode})`, `${d.bass} bass (${d.bassStyle})`, d.swing ? `swing ${d.swing.toFixed(2)}` : 'straight',
+      `reverb ${d.space}`, d.tone || '', `voices: ${voices.join(' + ')}`].filter(Boolean).join('  ·  ');
+  };
+  panel.addEventListener('click', (e) => { if (e.target.dataset.style) play(e.target.dataset.style); });
+  $('sp-words').addEventListener('click', () => {
+    take++;
+    voices = [0, 1].map(() => instruments[Math.floor(Math.random() * instruments.length)]);
+    if (current) play(current);
+  });
+  $('sp-stop').addEventListener('click', () => { stopSong(); current = null; panel.querySelectorAll('[data-style]').forEach((b) => b.classList.remove('on')); });
+}
+
 // ───────────────────────── letters ─────────────────────────
 // Write 4 lines, hear them as a song, send the link. They open it, hear the same song
 // (same seed → same glyphs, same music), and write back the same way.
@@ -1629,7 +1682,7 @@ $('my-colors').addEventListener('click', (e) => {
 function jamDNA(room) {
   // the symbols and everyone's words: secret words (cat, rain…) stack their sounds, like in the finale
   const texts = [String(room.seed), ...room.players.filter(Boolean).map((p) => [(p.glyphs || []).join(''), ...(p.words || [])].join(' '))];
-  return songDNA(texts.map((text) => ({ text })));
+  return songDNA(texts.map((text) => ({ text })), { jam: true });
 }
 
 function applyJamColors(room) {
@@ -1894,7 +1947,7 @@ function showJamEnd() {
   show('end');
   $('replay').textContent = 'stop';
   const d = state.dna;
-  $('end-recipe').textContent = `${d.keyName} · ${d.feel}  ·  ${d.bpm} bpm  ·  ${state.jamTaps.length} taps`;
+  $('end-recipe').textContent = `${d.style}  ·  ${d.keyName} · ${d.feel}  ·  ${d.bpm} bpm  ·  ${state.jamTaps.length} taps`;
   const secrets = d.secrets.length;
   $('end-secrets').textContent = secrets ? `✶ you found ${secrets} secret word${secrets > 1 ? 's' : ''}` : '';
   // the lyrics: each person's glyphs and the words they gave them
@@ -2120,7 +2173,9 @@ const linkParams = new URLSearchParams(location.search);
 const roomFromLink = linkParams.get('room');
 const screenFromLink = linkParams.get('screen');
 const letterFromLink = linkParams.get('letter');
-if (linkParams.has('patterns') && ['localhost', '127.0.0.1'].includes(location.hostname)) setTimeout(openPatternViewer, 300);
+const devHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+if (linkParams.has('patterns') && devHost) setTimeout(openPatternViewer, 300);
+else if (linkParams.has('sounds') && devHost) setTimeout(openSoundPreview, 300);
 else if (letterFromLink && /^[a-z0-9]{8}$/.test(letterFromLink)) openLetter(letterFromLink);
 else if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
 else if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
