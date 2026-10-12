@@ -2159,15 +2159,32 @@ if (Recognition || canRecord) {
 // The screen itself never moves. When the keyboard opens, the visible area shrinks:
 // measure how much of the screen the keyboard covers and sit the typing bar right
 // on top of it (no animation, no page scrolling — those made it jumpy).
-function fitKeyboard() {
-  const vv = window.visualViewport;
-  if (!vv) return;
-  const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-  document.documentElement.style.setProperty('--keyboard', `${covered}px`);
-  document.body.classList.toggle('typing', covered > 80);
+// Phones: while you type, the box glides up to the upper middle of the screen, out of the
+// keyboard's reach. iPhones only say how tall the keyboard is once it has finished sliding
+// up, so a box that follows it always arrives late and bounces; one that steps out of the
+// way never has to. The tap is caught before the browser focuses the box, so iOS doesn't
+// shove the whole page up either: we move the box first, then focus it without scrolling.
+const touchUI = matchMedia('(pointer: coarse)').matches;
+function setComposing(on) {
+  if (!touchUI || document.body.classList.contains('composing') === on) return;
+  const box = $('write');
+  const before = box.getBoundingClientRect().top;
+  document.body.classList.toggle('composing', on);
+  const after = box.getBoundingClientRect().top;
+  if (!box.hidden && before !== after) {
+    box.animate([{ translate: `0 ${before - after}px` }, { translate: '0 0' }], { duration: 300, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+  }
 }
-window.visualViewport?.addEventListener('resize', fitKeyboard);
-window.visualViewport?.addEventListener('scroll', fitKeyboard);
+$('message').addEventListener('touchend', (e) => {
+  if (!touchUI || document.activeElement === $('message')) return; // already typing: let the tap move the cursor
+  e.preventDefault(); // no native focus (it would scroll the page)
+  setComposing(true);
+  $('message').focus({ preventScroll: true });
+}, { passive: false });
+$('message').addEventListener('focus', () => setComposing(true));
+$('message').addEventListener('blur', () => {
+  setTimeout(() => { if (document.activeElement !== $('message')) setComposing(false); }, 60);
+});
 
 // Opened from a shared link? Go straight to that room (or, for a jam screen, back to being the screen).
 const linkParams = new URLSearchParams(location.search);
