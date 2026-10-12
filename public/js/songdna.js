@@ -273,7 +273,7 @@ export function songDNA(messages, options = {}) {
   // Secret words, in the order they were said, each once — and they stack.
   const claimed = new Set();
   for (const w of new Set(words)) {
-    if (SECRETS[w]) applySecret(d, SECRETS[w], claimed);
+    if (SECRETS[w] && !options.shift) applySecret(d, SECRETS[w], claimed); // a re-rolled song keeps its own sounds
     if (SECRETS[w] || PICTURE_WORD_SET.has(w)) d.secrets.push(w);
   }
 
