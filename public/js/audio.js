@@ -4,7 +4,7 @@
 
 import { hash } from './glyphs.js';
 import { getClip, findSyllable, findOnset } from './voicebank.js';
-import { MODES } from './songdna.js';
+import { MODES, RHYTHMS } from './songdna.js';
 
 // The current key. It follows the conversation (setKey after each message),
 // so the whole space drifts into new keys as people talk.
@@ -201,7 +201,9 @@ export async function initAudio() {
       : new Tone.Gain(1).connect(voiceIn);
   }
 
-  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, cleanVoice, soloBus, robotIn, muffle, crusher, harmony };
+  // The players' featured instruments pass through featureIn, where a song's style can colour them.
+  const featureIn = new Tone.Gain(1).connect(soloBus);
+  fx = { limiter, reverb, drop, bell, pad, voiceIn, recordedIn, cleanVoice, soloBus, featureIn, robotIn, muffle, crusher, harmony };
   newChimes();
   setKey(DEFAULT_KEY);
   startAmbience();
@@ -314,13 +316,20 @@ function scaleFor(basePitch = 180, k = key) {
   return all.sort((a, b) => distance(a) - distance(b)).slice(0, 6).sort((a, b) => a - b);
 }
 
-function melody(count, scaleLen, seed) {
+// A melody's shape: walk (small random steps, the original) · arp (leaps between every other
+// note, like a broken chord) · wave (climbs, then falls) · pedal (keeps coming back to one home note).
+function melody(count, scaleLen, seed, contour = 'walk') {
   let i = Math.floor(scaleLen / 2);
   let s = seed;
   const notes = [];
+  const top = scaleLen - 1;
   for (let n = 0; n < count; n++) {
     s = hash(String(s));
-    i = Math.min(scaleLen - 1, Math.max(0, i + (s % 5) - 2));
+    if (contour === 'arp') i = [0, 2, 4, 2][(n + (s % 2)) % 4] % scaleLen;
+    else if (contour === 'wave') i = Math.round((Math.sin((n / Math.max(1, count - 1)) * Math.PI) * 0.8 + 0.1) * top + ((s % 3) - 1) * 0.5);
+    else if (contour === 'pedal') i = n % 2 === 0 ? 1 : Math.min(top, 2 + (s % (scaleLen - 2)));
+    else i += (s % 5) - 2;
+    i = Math.min(top, Math.max(0, i));
     notes.push(i);
   }
   if (notes.length > 1) notes[notes.length - 1] = Math.min(1, scaleLen - 1); // settle low at the end
@@ -463,7 +472,7 @@ function instrumentEngine(voice) {
   const out = new Tone.Gain(1);
   synth.chain(...chain, out);
   const scrambled = new Tone.Gain(1).connect(fx.voiceIn);
-  const featured = new Tone.Gain(0).connect(fx.soloBus);
+  const featured = new Tone.Gain(0).connect(fx.featureIn);
   out.fan(scrambled, featured);
   voice.engine = { synth, scrambled, featured, mono: !(synth instanceof Tone.PolySynth), last: 0 };
   return voice.engine;
@@ -609,9 +618,14 @@ const BEATS = {
   shuffle: { kick: [0, 9], snare: [4, 12], hat: [0, 3, 6, 8, 11, 14] },
   sparse: { kick: [0, 8], snare: [12], hat: [4, 10, 14] },
   bossa: { kick: [0, 6, 8, 14], snare: [3, 10], hat: [0, 2, 4, 6, 8, 10, 12, 14] },
-  dub: { kick: [8], snare: [8], hat: [2, 6, 10, 14] }, // the one drop: everything lands on beat 3
   waltz: { kick: [0], snare: [4, 8], hat: [2, 6, 10] }, // 12 steps: a bar of 3
+  sixeight: { kick: [0, 10], snare: [6], hat: [0, 2, 4, 6, 8, 10] }, // 12 steps felt in 2: ONE-two-three FOUR-five-six
+  five: { kick: [0, 12], snare: [8, 16], hat: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18] }, // 20 steps: 3 + 2
+  seven: { kick: [0, 8], snare: [4, 11], hat: [0, 2, 4, 6, 8, 10, 12] }, // 14 steps: 2 + 2 + 3
 };
+// Steps (16th notes) in one bar of each time signature.
+const BAR_STEPS = { 3: 12, 4: 16, 5: 20, 6: 12, 7: 14 };
+const barSteps = (dna) => BAR_STEPS[dna.meter] || 16;
 // Arpeggio shapes over the 4 chord notes (4 = the root an octave up).
 const ARPS = {
   up: [0, 1, 2, 3], down: [3, 2, 1, 0], updown: [0, 1, 2, 3, 2, 1],
@@ -642,8 +656,8 @@ function buildBand(dna) {
   const padTop = muffle ? 1200 : dna.pad === 'strings' ? 1600 : 4000;
   const duck = keep(new Tone.Gain(1).connect(keep(new Tone.Filter(padTop, 'lowpass').connect(fx.reverb))));
   const pad = keep(new Tone.PolySynth(Tone.Synth, PADS[dna.pad]).connect(duck));
-  const bass = keep(new Tone.MonoSynth({ ...BASSES[dna.bass], portamento: dna.bassStyle === '808' ? 0.07 : 0 }).connect(out));
-  // Short chord stabs for the styles that comp instead of holding a pad (bossa, dub, waltz).
+  const bass = keep(new Tone.MonoSynth(BASSES[dna.bass]).connect(out));
+  // Short chord stabs for the styles that comp instead of holding a pad (bossa, waltz).
   let comp = null;
   if (dna.padMode && dna.padMode !== 'hold') {
     comp = keep(new Tone.PolySynth(Tone.Synth, {
@@ -652,6 +666,23 @@ function buildBand(dna) {
     }).connect(muffle ? keep(new Tone.Filter(1800, 'lowpass').connect(out)) : out));
     comp.connect(keep(new Tone.Gain(0.35).connect(fx.reverb)));
   }
+  // A soft second voice under the players' melody (some styles).
+  const harmony = dna.harmony ? keep(new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: 'sine' }, envelope: { attack: 0.03, decay: 0.3, sustain: 0.4, release: 0.4 }, volume: -20,
+  }).connect(fx.featureIn)) : null;
+  // The style's colour on the players' own instruments, between featureIn and the solo bus.
+  fx.featureIn.disconnect();
+  const colour = {
+    shimmer: () => [new Tone.Chorus(1.5, 4, 0.6).start(), new Tone.FeedbackDelay('4n', 0.35)], // drift: wide and floaty
+    tape: () => [new Tone.Vibrato(4.5, 0.12), new Tone.Filter(1700, 'lowpass')], // lofi: wobbly old tape
+    echo: () => [new Tone.PingPongDelay('8n', 0.3)], // pulse: bouncing echoes
+    warm: () => [new Tone.Filter(2600, 'lowpass')], // bossa: soft and close
+    crunch: () => [new Tone.BitCrusher(4), new Tone.Filter(5000, 'lowpass')], // chip: 8-bit
+    tremolo: () => [new Tone.Tremolo(7, 0.45).start()], // waltz: a music-box shiver
+  }[dna.voiceColour]?.().map(keep) || [];
+  if (colour.length) fx.featureIn.chain(...colour, fx.soloBus);
+  else fx.featureIn.connect(fx.soloBus);
+
   // Lo-fi: the little clicks and pops of an old record.
   const crackle = muffle ? keep(new Tone.NoiseSynth({
     noise: { type: 'white' }, envelope: { attack: 0.0005, decay: 0.004, sustain: 0, release: 0.002 }, volume: -30,
@@ -679,14 +710,18 @@ function buildBand(dna) {
   }).connect(crashFilter));
 
   return {
-    lead, lead2, pad, pad2, bass, comp, crackle, hat: main.hat, extra, crash,
+    lead, lead2, pad, pad2, bass, comp, crackle, harmony, hat: main.hat, extra, crash,
     kick: (t, beatLen) => {
       kick.triggerAttackRelease('C1', beatLen / 2, t);
       duck.gain.setValueAtTime(0.35, t);
       duck.gain.linearRampToValueAtTime(1, t + beatLen * 0.45);
     },
     hitSnare: main.hitSnare,
-    dispose: () => nodes.forEach((n) => n.dispose()),
+    dispose: () => {
+      nodes.forEach((n) => n.dispose());
+      fx.featureIn.disconnect(); // the players' instruments go back to their plain sound
+      fx.featureIn.connect(fx.soloBus);
+    },
   };
 }
 
@@ -732,14 +767,13 @@ const BASSLINES = {
   // style-only rhythms (the finale's styles use these too)
   bossa: { 0: 'R', 6: 'F', 8: 'F', 14: 'R' },
   waltz: { 0: 'R' }, // oom (the chords play the pah-pah)
-  808: { 0: 'R', 7: 'R', 10: 'F' }, // long, sliding notes under the trap kick
 };
 const JAM_BASSLINES = ['walk', 'pulse', 'disco', 'offbeat', 'dub', 'funk'];
 export const BASSLINE_NAMES = JAM_BASSLINES;
 
 function bassline(dna, chord, name = dna.bassline, bar = 16) {
   const shape = BASSLINES[name] || BASSLINES[JAM_BASSLINES[dna.seed % JAM_BASSLINES.length]];
-  const longest = name === '808' ? 8 : 4;
+  const longest = 4;
   const tone = { R: up(chord[0], -12), T: up(chord[1], -12), F: up(chord[2], -12), S: up(chord[3], -12), O: chord[0] };
   const steps = Object.keys(shape).map(Number);
   const line = {};
@@ -753,7 +787,6 @@ function bassline(dna, chord, name = dna.bassline, bar = 16) {
 // When a style plays chords as short stabs instead of one long held pad: which steps.
 const COMPING = {
   stab: [0, 3, 6, 10, 12], // bossa guitar
-  skank: [4, 12], // dub: the offbeat chop
   waltz: [4, 8], // the pah-pah
 };
 
@@ -763,9 +796,9 @@ function playSection(dna, { start, end, chord, level, crash, feature = false, gr
   const six = beatLen / 4;
   const length = end - start;
   const totalSteps = Math.round(length / six);
-  const bar = (dna.meter || 4) * 4; // steps in a bar: 16, or 12 in waltz time
-  const comping = COMPING[dna.padMode];
-  // held chords: always in the original; quietly under the stabs in a waltz; not at all under bossa/dub stabs
+  const bar = barSteps(dna); // steps in a bar: 16 in 4/4, 12 in 3/4 and 6/8, 20 in 5/4, 14 in 7/8
+  const comping = dna.padMode === 'waltz' && dna.meter === 6 ? [6] : COMPING[dna.padMode];
+  // held chords: always in the original; quietly under the stabs in a waltz; not at all under bossa stabs
   if (!comping || dna.padMode === 'waltz') band.pad.triggerAttackRelease(chord, length + 0.3, start, comping ? 0.25 : 0.5);
   if (level >= 3 && !comping) band.pad.triggerAttackRelease(chord.map((n) => up(n, 12)), length, start, 0.3);
   band.pad2?.triggerAttackRelease(chord.map((n) => up(n, 12)), length + 0.3, start, 0.4);
@@ -793,7 +826,6 @@ function playSection(dna, { start, end, chord, level, crash, feature = false, gr
     if (band.lead2 && !feature && k % 2 === 1 && level >= 1) band.lead2.triggerAttackRelease(up(tones[shape[shape.length - 1 - ((k >> 1) % shape.length)]], 12), '16n', t, 0.3);
     if (comping?.includes(step) && level >= 1) band.comp.triggerAttackRelease(stabChord, six * 1.4, t, step === 0 ? 0.8 : 0.6);
     if (band.crackle && Math.random() < 0.3) band.crackle.triggerAttackRelease(0.004, t + Math.random() * six, 0.2 + Math.random() * 0.5); // vinyl dust
-    if (dna.hatRolls && level >= 3 && step >= 14) band.hat.triggerAttackRelease(0.01, t + six / 2, 0.45); // trap hat rolls
     if (line) { if (line[step]) band.bass.triggerAttackRelease(line[step].note, line[step].len * six * 0.9, t, 0.9); }
     else if (level >= 1 && (step % 8 === 0 || step % 8 === 6)) band.bass.triggerAttackRelease(root, step % 8 === 0 ? six * 5.6 : six, t);
     if (level >= 2 && beat.kick.includes(step) && !fill) band.kick(t, beatLen);
@@ -832,8 +864,9 @@ function schedulePass(song, passStart, pass) {
     const voice = voices[msg.player];
     const scale = scaleFor(msg.sung?.basePitch || voice?.basePitch, dna); // a spoken message sings near its speaker's pitch
     const syls = msg.words.flatMap((w, wi) => w.syllables.map((s, si) => ({ s, wi, si })));
-    const notes = melody(syls.length, scale.length, hash(msg.words.map((w) => w.word).join(' ')) ^ dna.seed);
-    const steps = syls.length > 14 ? 1 : 2; // long messages sing in 16ths so they don't drag
+    const notes = melody(syls.length, scale.length, hash(msg.words.map((w) => w.word).join(' ')) ^ dna.seed, dna.contour);
+    // note lengths: the style's rhythm (long messages sing in quick 16ths so they don't drag)
+    const rhythm = syls.length > 14 ? [1] : RHYTHMS[dna.rhythm] || [2];
     const msgStart = t;
     at(t, () => song === currentSong && callbacks.onMessage(m, pass));
 
@@ -851,10 +884,15 @@ function schedulePass(song, passStart, pass) {
       t = msgStart + (segments[segments.length - 1].end - zero) + six;
     } else {
       syls.forEach(({ s, wi, si }, n) => {
-        const len = (n === syls.length - 1 ? 4 : steps) * six;
+        const len = (n === syls.length - 1 ? 4 : rhythm[n % rhythm.length]) * six;
         const when = t;
         const freq = scale[notes[n]];
         soon(when, () => sing(voice, s, when, freq, len * 0.95, false, true));
+        // the style's harmony: a soft second voice an octave or a third (two notes up the scale) above
+        if (band?.harmony && voice?.instrument) {
+          const over = dna.harmony === 'octave' ? freq * 2 : scale[Math.min(scale.length - 1, notes[n] + 2)] * (notes[n] + 2 >= scale.length ? 2 : 1);
+          soon(when, () => band?.harmony.triggerAttackRelease(over, len * 0.9, when, 0.5));
+        }
         at(t, () => song === currentSong && callbacks.onSyllable(m, wi, si));
         t += len;
       });
@@ -878,7 +916,7 @@ function schedulePass(song, passStart, pass) {
 
   // One bar back home on the first chord, then go round again.
   const turnaround = onBeat(t);
-  const passEnd = turnaround + beatLen * (dna.meter || 4);
+  const passEnd = turnaround + (beatLen / 4) * barSteps(dna);
   soon(turnaround, () => playSection(dna, { start: turnaround, end: passEnd, chord: chordFor(dna, 0), level: 4 }));
   soon(passEnd, () => { if (song === currentSong) schedulePass(song, passEnd, pass + 1); });
   rain(passStart, passEnd - passStart, dna.rain);

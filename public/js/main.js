@@ -1271,9 +1271,10 @@ function openSoundPreview() {
     state.styleOverride = style;
     startFinale();
     const d = state.dna;
-    $('sp-info').textContent = [`${d.style}`, `${d.bpm} bpm`, `${d.keyName} (${d.feel})`, `${d.meter}/4`, `${d.kit} drums, ${d.pattern} beat`,
-      `${d.lead} lead, ${d.pad} pad (${d.padMode})`, `${d.bass} bass (${d.bassStyle})`, d.swing ? `swing ${d.swing.toFixed(2)}` : 'straight',
-      `reverb ${d.space}`, d.tone || '', `voices: ${voices.join(' + ')}`].filter(Boolean).join('  ·  ');
+    $('sp-info').textContent = [`${d.style}`, `${d.meterName}`, `${d.bpm} bpm`, `${d.keyName} (${d.feel})`,
+      `sung: ${d.rhythm} rhythm, ${d.contour} melody`, `voices: ${voices.join(' + ')}${d.voiceColour ? ` (${d.voiceColour})` : ''}${d.harmony ? ` + ${d.harmony} harmony` : ''}`,
+      `${d.kit} drums, ${d.pattern} beat`, `${d.lead} lead, ${d.pad} pad (${d.padMode})`, `${d.bass} bass (${d.bassStyle})`,
+      d.swing ? `swing ${d.swing.toFixed(2)}` : 'straight', `reverb ${d.space}`, d.tone || ''].filter(Boolean).join('  ·  ');
   };
   panel.addEventListener('click', (e) => { if (e.target.dataset.style) play(e.target.dataset.style); });
   $('sp-words').addEventListener('click', () => {

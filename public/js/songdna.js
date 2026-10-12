@@ -42,50 +42,66 @@ const LEADS = ['mallet', 'bells', 'kalimba', 'glass', 'chip', 'harp'];
 // Styles: flavours of the same garden (the rain, the plinks and the reverb stay), each a
 // matching bundle so a song has a clear identity instead of an average of random picks.
 //   bpm      tempo range (energy picks low or high inside it)
-//   patterns drum beats · padMode: hold (long chords) | stab (short comping) | skank (offbeat) | waltz (pah-pah)
+//   patterns drum beats · padMode: hold (long chords) | stab (short comping) | waltz (pah-pah)
 //   bassStyle the bass rhythm (roots = the original) · space: reverb amount 0–1
-//   tone     muffle (lo-fi) | crunch (chip) · meter 3 = waltz time
+//   tone     muffle (lo-fi) | crunch (chip)
+//   meters   beats per bar: 4 = 4/4, 3 = 3/4, 6 = 6/8, 5 = 5/4, 7 = 7/8 (one is rolled)
+//   rhythms  how the players' lines are sung (RHYTHMS) · contours: the melody's shape
+//   voice    a colour on the players' own instruments · harmony: a soft second line under the melody
 // A list left out = anything goes (the original garden behaviour).
 export const STYLES = {
-  garden: {}, // the original: everything rolled freely
+  garden: { meters: [4, 4, 4, 3, 6, 5, 7] }, // the original sound, everything rolled freely (any rhythm, any shape)
   drift: {
+    meters: [4, 6, 5], rhythms: ['lazy', 'dotted', 'straight'], contours: ['wave', 'walk'], voice: 'shimmer', harmony: ['octave', null],
     bpm: [64, 78], kits: ['tick', 'soft'], patterns: ['sparse'], leads: ['glass', 'bells'], pads: ['choir', 'warm', 'strings'],
     basses: ['sub', 'round'], arps: ['wide', 'updown'], arpRate: 2, swing: [0, 0], space: 0.75, quietDrums: true, echo: 0.15,
   },
   lofi: {
+    meters: [4, 4, 6], rhythms: ['longshort', 'dotted', 'lazy'], contours: ['walk', 'pedal'], voice: 'tape', harmony: [null, 'third'],
     bpm: [70, 88], kits: ['soft'], patterns: ['broken', 'half'], leads: ['mallet', 'kalimba'], pads: ['warm', 'organ'],
     basses: ['round'], arps: ['broken', 'alberti'], arpRate: 2, swing: [0.22, 0.32], space: 0.35, tone: 'muffle', bassStyle: 'walk',
   },
   pulse: {
+    meters: [4, 4, 7], rhythms: ['straight', 'skip', 'sync'], contours: ['arp', 'pedal'], voice: 'echo', harmony: ['octave'],
     bpm: [104, 120], kits: ['pulse'], patterns: ['four'], leads: ['bells', 'glass', 'chip'], pads: ['strings'],
     basses: ['buzz', 'pluck'], arps: ['up', 'updown'], arpRate: 1, swing: [0, 0], space: 0.55, bassStyle: 'pulse',
   },
   bossa: {
+    meters: [4], rhythms: ['dotted', 'sync'], contours: ['walk', 'wave'], voice: 'warm', harmony: ['third', null],
     bpm: [118, 132], kits: ['soft', 'tick'], patterns: ['bossa'], leads: ['harp', 'kalimba', 'mallet'], pads: ['warm'],
     basses: ['round', 'pluck'], arps: ['alberti', 'broken'], arpRate: 2, swing: [0.06, 0.14], space: 0.3, padMode: 'stab', bassStyle: 'bossa',
   },
   chip: {
+    meters: [4, 7, 5], rhythms: ['skip', 'straight', 'triplet'], contours: ['arp', 'walk'], voice: 'crunch', harmony: ['octave', null],
     bpm: [138, 156], kits: ['glitch', 'tick'], patterns: ['broken', 'four'], leads: ['chip'], pads: ['organ'],
     basses: ['pluck'], arps: ['up', 'down', 'updown'], arpRate: 1, swing: [0, 0], space: 0.15, tone: 'crunch', bassStyle: 'pulse',
   },
   waltz: {
+    meters: [3, 6], rhythms: ['lazy', 'straight', 'triplet'], contours: ['wave', 'arp'], voice: 'tremolo', harmony: ['third', 'octave'],
     bpm: [92, 108], kits: ['soft', 'tick'], patterns: ['waltz'], leads: ['bells', 'kalimba', 'glass'], pads: ['warm', 'strings'],
-    basses: ['round'], arps: ['up', 'updown'], arpRate: 2, swing: [0, 0], space: 0.55, padMode: 'waltz', bassStyle: 'waltz', meter: 3,
-  },
-  trap: {
-    bpm: [136, 150], kits: ['deep'], patterns: ['trap'], leads: ['glass', 'bells'], pads: ['choir', 'strings'],
-    basses: ['sub'], arps: ['wide', 'down'], arpRate: 2, swing: [0, 0], space: 0.5, bassStyle: '808', hatRolls: true, darker: 1,
-  },
-  dub: {
-    bpm: [70, 80], kits: ['deep', 'soft'], patterns: ['dub'], leads: ['mallet', 'glass'], pads: ['organ'],
-    basses: ['sub', 'round'], arps: ['wide'], arpRate: 2, swing: [0.05, 0.12], space: 0.45, echo: 0.25, padMode: 'skank', bassStyle: 'dub',
+    basses: ['round'], arps: ['up', 'updown'], arpRate: 2, swing: [0, 0], space: 0.55, padMode: 'waltz', bassStyle: 'waltz',
   },
 };
+// How a line is sung: note lengths in 16th steps, cycling through the line (the last note rings).
+export const RHYTHMS = {
+  straight: [2], // even 8ths (the original)
+  dotted: [3, 3, 2], // the tresillo: long, long, short
+  longshort: [3, 1], // a lazy swing
+  lazy: [4, 2], // half a beat behind
+  skip: [1, 1, 2], // quick-quick-slow
+  triplet: [4 / 3, 4 / 3, 4 / 3], // three to a beat
+  sync: [1, 2, 1, 2, 2], // syncopated: notes land between the beats
+};
+const CONTOURS = ['walk', 'arp', 'wave', 'pedal'];
+// What the different time signatures play, and what to call them.
+const METER_BEATS = { 3: 'waltz', 6: 'sixeight', 5: 'five', 7: 'seven' };
+const METER_NAMES = { 3: '3/4', 4: '4/4', 5: '5/4', 6: '6/8', 7: '7/8' };
+
 // How likely each style is, by the conversation's energy (calm · normal · hype).
 const STYLE_ODDS = {
-  calm: { garden: 3, drift: 3, lofi: 3, waltz: 2, dub: 2, bossa: 1 },
-  normal: { garden: 3, lofi: 2, bossa: 3, dub: 2, pulse: 2, waltz: 1, drift: 1 },
-  hype: { garden: 2, pulse: 3, chip: 2, trap: 2, bossa: 1 },
+  calm: { garden: 3, drift: 3, lofi: 3, waltz: 2, bossa: 1 },
+  normal: { garden: 3, lofi: 2, bossa: 3, pulse: 2, waltz: 1, drift: 1 },
+  hype: { garden: 2, pulse: 3, chip: 2, bossa: 1 },
 };
 // Words that push a song toward a style (the first one said wins).
 const STYLE_WORDS = {
@@ -95,8 +111,6 @@ const STYLE_WORDS = {
   beach: 'bossa', summer: 'bossa', vacation: 'bossa', brazil: 'bossa', sunny: 'bossa',
   game: 'chip', games: 'chip', gaming: 'chip', nintendo: 'chip', pixel: 'chip', videogame: 'chip', videogames: 'chip',
   halloween: 'waltz', spooky: 'waltz', ballroom: 'waltz', waltz: 'waltz',
-  fire: 'trap', lit: 'trap', hard: 'trap', bass: 'trap',
-  island: 'dub', reggae: 'dub', jamaica: 'dub', irie: 'dub',
 };
 const PADS = ['warm', 'strings', 'choir', 'organ'];
 const BASSES = ['round', 'sub', 'buzz', 'pluck'];
@@ -213,11 +227,11 @@ export function songDNA(messages, options = {}) {
   // The style comes first: a word that pushes one, or the dice weighted by energy.
   const band = energy >= 6 ? 'hype' : energy >= 2 ? 'normal' : 'calm';
   const pushed = words.map((w) => STYLE_WORDS[w]).find(Boolean);
-  const odds = Object.entries(STYLE_ODDS[band]).filter(([name]) => !(options.jam && STYLES[name].meter === 3));
+  const odds = Object.entries(STYLE_ODDS[band]).filter(([name]) => !(options.jam && name === 'waltz'));
   let roll = rand() * odds.reduce((n, [, w]) => n + w, 0);
   const rolled = odds.find(([, w]) => (roll -= w) < 0)?.[0] || 'garden';
   let styleName = options.style || pushed || rolled;
-  if (options.jam && STYLES[styleName].meter === 3) styleName = 'garden';
+  if (options.jam && styleName === 'waltz') styleName = 'garden'; // a jam's loops are built on 4-beat bars
   const st = STYLES[styleName];
   const within = (list, all) => choose(list || all);
 
@@ -235,12 +249,15 @@ export function songDNA(messages, options = {}) {
     swing: st.swing ? st.swing[0] + rand() * (st.swing[1] - st.swing[0]) : rand() < 0.4 ? 0.12 + rand() * 0.18 : 0,
     delayTime: choose(['8n', '8n.', '4n', '16n.']),
     delayFeedback: 0.2 + rand() * 0.25 + (st.echo || 0),
-    meter: st.meter || 4,
+    meter: options.jam ? 4 : choose(st.meters || [4]),
+    rhythm: within(st.rhythms, Object.keys(RHYTHMS)),
+    contour: within(st.contours, CONTOURS),
+    voiceColour: st.voice || null,
+    harmony: st.harmony ? choose(st.harmony) : null,
     padMode: st.padMode || 'hold',
     bassStyle: st.bassStyle || 'roots',
     space: st.space ?? 0.5,
     tone: st.tone || null,
-    hatRolls: !!st.hatRolls,
     quietDrums: !!st.quietDrums,
     rain: 0.4 + rand() * 0.6,
     brighter: 0,
@@ -274,6 +291,8 @@ export function songDNA(messages, options = {}) {
   const [floor, ceiling] = st.bpm ? [st.bpm[0] - 10, st.bpm[1] + 10] : [80, 150];
   d.bpm = Math.round(Math.max(floor, Math.min(ceiling, bpm + d.bpmShift)));
   d.pattern = st.patterns ? choose(st.patterns) : choose(KITS[d.kit] || KITS.soft);
+  if (d.meter !== 4 && !(d.meter === 3 && d.pattern === 'waltz')) d.pattern = METER_BEATS[d.meter]; // odd meters get their own beat
+  d.meterName = METER_NAMES[d.meter];
   if (energy >= 6 && d.arpRate === 2 && rand() < 0.6) d.arpRate = 1;
 
   d.keyName = `${NOTE_NAMES[d.root]} ${d.mode}`;
