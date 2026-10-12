@@ -672,7 +672,7 @@ function buildBand(dna) {
     tape: () => [new Tone.Vibrato(4.5, 0.12), new Tone.Filter(1700, 'lowpass')], // lofi: wobbly old tape
     echo: () => [new Tone.PingPongDelay('8n', 0.3)], // pulse: bouncing echoes
     warm: () => [new Tone.Filter(2600, 'lowpass')], // bossa: soft and close
-    crunch: () => [new Tone.BitCrusher(4), new Tone.Filter(5000, 'lowpass')], // chip: 8-bit
+    blip: () => [new Tone.FeedbackDelay('16n.', 0.25)], // chip: a quick video-game echo (the lead and drums carry the crunch)
     tremolo: () => [new Tone.Tremolo(7, 0.45).start()], // waltz: a music-box shiver
   }[dna.voiceColour]?.().map(keep) || [];
   if (colour.length) fx.featureIn.chain(...colour, fx.soloBus);

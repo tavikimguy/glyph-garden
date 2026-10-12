@@ -72,7 +72,7 @@ export const STYLES = {
     basses: ['round', 'pluck'], arps: ['alberti', 'broken'], arpRate: 2, swing: [0.06, 0.14], space: 0.3, padMode: 'stab', bassStyle: 'bossa',
   },
   chip: {
-    meters: [4, 7, 5], rhythms: ['skip', 'straight', 'triplet'], contours: ['arp', 'walk'], voice: 'crunch', harmony: ['octave', null],
+    meters: [4, 7, 5], rhythms: ['skip', 'straight', 'triplet'], contours: ['arp', 'walk'], voice: 'blip', harmony: ['octave', null],
     bpm: [138, 156], kits: ['glitch', 'tick'], patterns: ['broken', 'four'], leads: ['chip'], pads: ['organ'],
     basses: ['pluck'], arps: ['up', 'down', 'updown'], arpRate: 1, swing: [0, 0], space: 0.15, tone: 'crunch', bassStyle: 'pulse',
   },
