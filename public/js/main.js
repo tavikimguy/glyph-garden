@@ -1403,7 +1403,16 @@ for (const [form, input, note] of [['end-save', 'end-save-name', 'end-save-note'
   });
 }
 const offerInbox = (form, note) => { $(form).hidden = !!me; if (me) $(note).textContent = ''; };
-$('have-inbox').addEventListener('click', () => { $('login-form').hidden = false; $('have-inbox').hidden = true; });
+// Signing in or making one: only the form you're using shows.
+function showInboxForm(signIn) {
+  $('login-form').hidden = !signIn;
+  $('claim-form').hidden = signIn;
+  $('have-inbox').hidden = signIn;
+  inboxNote('');
+  (signIn ? $('login-name') : $('claim-name')).focus({ preventScroll: true });
+}
+$('have-inbox').addEventListener('click', () => showInboxForm(true));
+$('new-inbox').addEventListener('click', () => showInboxForm(false));
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const handle = cleanName($('login-name').value);
