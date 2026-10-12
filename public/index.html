@@ -205,6 +205,12 @@
       <button id="letter-write-back" class="quiet" hidden>write back ✉</button>
       <button id="letter-share" class="quiet" hidden>share the link</button>
     </div>
+    <form id="open-save" class="fields save-inbox" hidden>
+      <span class="quiet-text">keep your letters:</span>
+      <input id="open-save-name" class="field" maxlength="17" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="pick a name">
+      <button type="submit">make an inbox</button>
+    </form>
+    <p id="open-save-note" class="quiet-text"></p>
     <div id="letter-thread" hidden>
       <p class="quiet-text">the whole conversation · tap one to hear it</p>
       <div id="letter-list" class="row"></div>
@@ -226,6 +232,13 @@
       <button id="letter-reply" hidden>write back ✉</button>
       <button id="letter-back" class="quiet" hidden>all letters</button>
     </div>
+    <button id="letter-new" hidden></button>
+    <form id="end-save" class="fields save-inbox" hidden>
+      <span class="quiet-text">keep your letters:</span>
+      <input id="end-save-name" class="field" maxlength="17" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="pick a name">
+      <button type="submit">make an inbox</button>
+    </form>
+    <p id="end-save-note" class="quiet-text"></p>
   </section>
 
   <script type="module" src="js/main.js"></script>

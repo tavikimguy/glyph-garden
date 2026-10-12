@@ -191,6 +191,8 @@ button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decor
 #my-letters { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 #my-letters button { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--dim); border-color: var(--line); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #letter-list button { margin: 3px; padding: 4px 12px; font-size: 12px; }
+#letter-new { border-color: #ffd27a; color: #ffd27a; animation: keyin 1.2s ease-out; }
+.save-inbox { margin-top: 8px; }
 
 .panel .back { position: absolute; top: 10px; left: 10px; margin: 0; padding: 4px 10px; font-size: 13px; }
 #mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }

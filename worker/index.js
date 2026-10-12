@@ -89,6 +89,23 @@ export default {
       await deliver(env, id, people, letter, count);
       return Response.json({ id, count });
     }
+    // Made an inbox after writing letters as a guest? Bring those conversations into it:
+    // POST /api/letter/ID/join (signed) { author } → you're in it, and the letters this
+    // device wrote (same author id) are marked as yours.
+    const joinMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})\/join$/);
+    if (joinMatch && request.method === 'POST') {
+      const me = await whoIs(request, env);
+      if (!me) return new Response('sign in', { status: 401 });
+      const { author } = (await request.json().catch(() => null)) || {};
+      const joined = await env.ROOMS.getByName(`letter:${joinMatch[1]}`).joinThread(me, typeof author === 'string' ? author : '');
+      if (!joined) return new Response('no such letter', { status: 404 });
+      const last = joined.letters.at(-1);
+      await env.ROOMS.getByName(`user:${me}`).touchInbox({
+        thread: joinMatch[1], with: joined.people.filter((h) => h !== me), lastFrom: last.from || null,
+        count: joined.letters.length, line: last.messages[0], at: last.sent,
+      });
+      return Response.json({ ok: true });
+    }
     const letterMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})$/);
     if (letterMatch) {
       const [, id] = letterMatch;
@@ -204,6 +221,17 @@ export class Room extends DurableObject {
     const people = [...new Set([...(await this.getPeople()), ...join])];
     await this.ctx.storage.put({ letters: next, people });
     return { count: next.length, people };
+  }
+
+  // Someone signed in joins this conversation; letters their device wrote become theirs.
+  async joinThread(handle, author) {
+    const letters = await this.getThread();
+    if (!letters) return null;
+    const mine = (l) => author && l.author === author && !l.from;
+    const next = letters.map((l) => (mine(l) ? { ...l, from: handle } : l));
+    const people = [...new Set([...(await this.getPeople()), handle])];
+    await this.ctx.storage.put({ letters: next, people });
+    return { letters: next, people };
   }
 
   // ── an inbox (a Room named user:NAME) ──

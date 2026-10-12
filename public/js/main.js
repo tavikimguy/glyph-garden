@@ -513,6 +513,8 @@ function showEncore() {
   $('letter-reply').hidden = !reading || lastIsMine; // write back when they wrote last
   $('letter-back').hidden = !letter || !state.thread;
   $('again').hidden = letter;
+  $('letter-new').hidden = true;
+  if (letter && state.thread) { offerInbox('end-save', 'end-save-note'); watchThread(); } else { $('end-save').hidden = true; $('end-save-note').textContent = ''; }
 }
 
 // Stop the loop: the band stops, the letters drift off into space again.
@@ -1362,18 +1364,45 @@ async function renderLetterTab() {
 }
 $('inbox-list').addEventListener('click', (e) => { const id = e.target.closest('button')?.dataset.id; if (id) openLetter(id); });
 
-$('claim-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const handle = cleanName($('claim-name').value);
-  if (!/^[a-z0-9_]{3,16}$/.test(handle)) return inboxNote('a name is 3–16 letters, numbers or _');
+// Make an inbox (from the letter tab, or after writing as a guest). Returns an error, or null.
+async function claimInbox(name) {
+  const handle = cleanName(name);
+  if (!/^[a-z0-9_]{3,16}$/.test(handle)) return 'a name is 3–16 letters, numbers or _';
   const phrase = makePhrase();
   const res = await fetch('/api/user', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, phrase }) }).catch(() => null);
-  if (!res?.ok) return inboxNote(res?.status === 409 ? `@${handle} is taken — try another` : 'couldn’t make it — try again');
+  if (!res?.ok) return res?.status === 409 ? `@${handle} is taken — try another` : 'couldn’t make it — try again';
   saveMe({ handle, phrase });
+  await joinRemembered();
+  return null;
+}
+// Every conversation this phone has been part of moves into your inbox (and your letters in
+// them are marked as yours), so letters written before you had an inbox aren't lost.
+async function joinRemembered() {
+  const ids = new Set([...myLetters().map((l) => l.id), ...(state.thread ? [state.thread.id] : [])]);
+  await Promise.all([...ids].map((id) => fetch(`/api/letter/${id}/join`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...signed() }, body: JSON.stringify({ author: deviceId }),
+  }).catch(() => null)));
+}
+
+$('claim-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const error = await claimInbox($('claim-name').value);
+  if (error) return inboxNote(error);
   inboxNote('');
   showPhrase();
   renderLetterTab();
 });
+// The same, from a letter's song card or its waiting screen (when you're not signed in).
+for (const [form, input, note] of [['end-save', 'end-save-name', 'end-save-note'], ['open-save', 'open-save-name', 'open-save-note']]) {
+  $(form).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const error = await claimInbox($(input).value);
+    if (error) { $(note).textContent = error; return; }
+    $(form).hidden = true;
+    $(note).textContent = `saved to @${me.handle} ✓ · your secret word is “${me.phrase}” — remember it`;
+  });
+}
+const offerInbox = (form, note) => { $(form).hidden = !!me; if (me) $(note).textContent = ''; };
 $('have-inbox').addEventListener('click', () => { $('login-form').hidden = false; $('have-inbox').hidden = true; });
 $('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1382,6 +1411,7 @@ $('login-form').addEventListener('submit', async (e) => {
   const res = await fetch('/api/user/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, phrase }) }).catch(() => null);
   if (!res?.ok) return inboxNote(res?.status === 429 ? 'too many tries — wait an hour' : 'that name and that word don’t match');
   saveMe({ handle, phrase });
+  await joinRemembered();
   inboxNote('');
   renderLetterTab();
 });
@@ -1473,6 +1503,8 @@ $('letter-send').addEventListener('click', async () => {
       state.sentLink = letterLink(id);
       try { history.replaceState(null, '', `?letter=${id}`); } catch { /* ignore */ }
       $('letter-back').hidden = false;
+      offerInbox('end-save', 'end-save-note'); // not signed in? offer to keep it
+      watchThread();
     } catch {
       button.textContent = 'couldn’t send — try again';
       return;
@@ -1500,6 +1532,30 @@ async function shareLetter(text, button) {
   button.textContent = button === $('letter-send') ? 'send it again' : 'share the link';
 }
 $('letter-share').addEventListener('click', () => shareLetter('my letter ✉', $('letter-share')));
+
+// While you're in a conversation (its song, or its waiting screen), check every 10 s for a
+// reply; when one lands, say so (and let you open it) without you having to reload.
+function watchThread() {
+  clearInterval(state.threadWatch);
+  if (!state.thread) return;
+  const id = state.thread.id;
+  state.threadWatch = setInterval(async () => {
+    const here = state.mode === 'letter' && state.thread?.id === id && (state.phase === 'encore' || state.phase === 'finale' || !$('letter-open').hidden);
+    if (!here) { clearInterval(state.threadWatch); return; }
+    const res = await fetch(`/api/letter/${id}`).catch(() => null);
+    if (!res?.ok) return;
+    const { letters, people } = await res.json();
+    if (letters.length <= state.thread.letters.length) return;
+    state.thread = { id, letters, people };
+    const last = letters.at(-1);
+    if (isMine(last)) return;
+    if (!$('letter-open').hidden) { openLetter(id); return; } // the waiting screen just updates
+    $('letter-new').textContent = `${last.from ? `@${last.from}` : 'they'} wrote back ✉ open it`;
+    $('letter-new').hidden = false;
+    plink('reply'); // a soft chime
+  }, 10_000);
+}
+$('letter-new').addEventListener('click', () => { $('letter-new').hidden = true; playLetter(state.thread.letters.length - 1); });
 
 // A letter link: fetch the whole conversation and show where it's at.
 async function openLetter(id) {
@@ -1531,6 +1587,8 @@ async function openLetter(id) {
   $('letter-write-back').hidden = mine;
   $('letter-share').hidden = !mine;
   $('letter-thread').hidden = letters.length < 2;
+  offerInbox('open-save', 'open-save-note');
+  watchThread();
   $('letter-list').innerHTML = letters.map((l, i) => `<button data-i="${i}" style="color:${rgb(PALETTE[l.color] || COLORS[0])}">${i + 1} · ${isMine(l) ? 'you' : l.from ? `@${escapeHtml(l.from)}` : 'them'}</button>`).join('');
 }
 $('letter-open-btn').addEventListener('click', () => playLetter(state.thread.letters.length - 1));
