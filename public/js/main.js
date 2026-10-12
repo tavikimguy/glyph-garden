@@ -23,6 +23,7 @@ const GAME_MODES = {
   duet: { perPlayer: 4 }, // take turns, 4 each
   diary: { perPlayer: 6, round: 2 }, // just you, 6 lines, a dance every 2
   letter: { perPlayer: 4, round: 4 }, // just you, 4 lines, no dances: straight to the song, then send it
+  film: { perPlayer: 2 }, // the promo recording: a scripted duet, 2 lines each, one dance
   // Party: no turns, max 2 each per round. The room decides when a round ends (once
   // everyone has a line in, or after 30 s) and tells every phone; 3 rounds (2 if 5+ people).
   party: { perRound: 2, free: true },
@@ -189,6 +190,7 @@ function showRoundPrompt(on) {
 }
 
 function startWriting() {
+  if (state.filming) return filmNextLine();
   // Let in anything that arrived meanwhile (e.g. during a dance). Stop if one of
   // them finishes a round — that starts the next dance instead.
   while (state.inbox.length) {
@@ -478,6 +480,7 @@ function startFinale() {
     },
   });
   state.song = song;
+  if (state.filming) { setTimeout(() => { if (state.song === song) endFilm(); }, song.firstPass * 1000); return; }
   // After the first time through, show the song card — but keep playing.
   setTimeout(() => { if (state.song === song) showEncore(); }, song.firstPass * 1000);
 }
@@ -985,7 +988,7 @@ function sketch(p) {
   };
 
   p.windowResized = () => {
-    if (keyboardUp()) return; // a keyboard opening isn't a resize: the garden keeps its full height
+    if (keyboardUp() || state.filming) return; // a keyboard opening isn't a resize: the garden keeps its full height
     appHeight = window.innerHeight;
     document.documentElement.style.setProperty('--app-h', `${appHeight}px`);
     p.resizeCanvas(window.innerWidth, appHeight);
@@ -1058,6 +1061,7 @@ function sketch(p) {
     }
     ctx.shadowBlur = 0;
     drawLyric(p, now);
+    if (state.filmCard) drawFilmCard(p, now);
   };
 }
 
@@ -1243,6 +1247,108 @@ function openPatternViewer() {
     if (e.key === 'ArrowRight') play(current + 1);
     if (e.key === 'ArrowLeft') play(current - 1);
   });
+}
+
+// ───────────────────────── promo recording (dev only: /?record on localhost) ─────────────────────────
+// Records a scripted duet as a portrait video (1080×1920): only the garden canvas and the
+// game's own sound. The lines fly in without the typing box ever showing; the finale
+// reveals and sings them. Keep the tab visible while it records (~1 minute).
+const FILM_SCRIPTS = {
+  moon: { voices: ['marimba', 'flute'], colors: ['sky', 'rose'], lines: ['are you awake', 'yes, looking at the moon', 'it looks like a cat', 'meet me by the sea'] },
+  pizza: { voices: ['keys', 'steelpan'], colors: ['gold', 'mint'], lines: ['i made you a pizza', 'with olives?', 'of course, and my heart', 'best day ever'] },
+  spooky: { voices: ['musicbox', 'cello'], colors: ['lilac', 'peach'], lines: ['happy halloween', 'my dog is a pumpkin', 'spooky but cute', 'trick or treat!!'] },
+};
+function openFilm() {
+  resetGarden(4242);
+  state.phase = 'film-setup';
+  show(null);
+  const panel = document.createElement('div');
+  panel.id = 'pattern-viewer';
+  panel.innerHTML = `<p class="quiet-text">promo recording · portrait 1080×1920 · only the garden and its sound are recorded · keep this tab visible</p>
+    <div><select id="film-script">${Object.keys(FILM_SCRIPTS).map((k) => `<option>${k}</option>`).join('')}</select>
+    <select id="film-style"><option value="">style: auto</option>${Object.keys(STYLES).map((k) => `<option>${k}</option>`).join('')}</select>
+    <button id="film-go">● record</button></div><p id="film-note" class="quiet-text"></p>`;
+  document.body.append(panel);
+  $('film-go').addEventListener('click', () => startFilm($('film-script').value, $('film-style').value));
+}
+
+async function startFilm(name, style) {
+  const script = FILM_SCRIPTS[name];
+  await startAudio();
+  // the canvas becomes a phone-shaped 540×960 (×2 = 1080×1920), shown scaled to fit
+  P.pixelDensity(2);
+  P.resizeCanvas(540, 960);
+  Object.assign(P.canvas.style, { height: 'min(94vh, 960px)', width: 'auto', display: 'block', margin: '3vh auto 0' });
+  $('pattern-viewer').hidden = true;
+  resetGarden(hash(name) >>> 0);
+  state.mode = 'film';
+  state.order = [0, 1];
+  state.filming = { script, name };
+  state.styleOverride = style || undefined;
+  state.robots = [...script.voices];
+  state.banks = script.voices.map(robotVoice);
+  script.colors.forEach((c, i) => { COLORS[i] = PALETTE[c]; });
+  // record the canvas + everything the game plays
+  const dest = Tone.getContext().rawContext.createMediaStreamDestination();
+  Tone.getDestination().connect(dest);
+  const stream = new MediaStream([...P.canvas.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const type = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+  const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 10_000_000 });
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `glyph-garden-${name}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+    a.click();
+    $('pattern-viewer').hidden = false;
+    $('film-note').textContent = `saved ${a.download} to your downloads ✓`;
+  };
+  state.filming.recorder = recorder;
+  recorder.start(1000);
+  state.phase = 'film';
+  state.filmCard = { text: 'glyph garden', sub: 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
+  setTimeout(() => filmNextLine(), 2600);
+}
+
+// The next scripted line flies in (like a sent message) a moment after the last settles.
+function filmNextLine() {
+  const { script } = state.filming;
+  const n = state.messages.length;
+  if (n >= script.lines.length) return;
+  state.phase = 'write';
+  show(null);
+  setTimeout(() => { if (state.filming) receive(currentPlayer(), script.lines[n], false); }, n === 0 ? 0 : 1600);
+}
+
+function endFilm() {
+  state.filmCard = { text: 'glyph garden', sub: 'glyph-garden.tavikim.workers.dev', from: P.millis(), to: Infinity };
+  setTimeout(() => {
+    stopSong();
+    setTimeout(() => {
+      state.filming.recorder.stop();
+      state.filming = null;
+    }, 400);
+  }, 3200);
+}
+
+// A title over the garden (fades in and out), drawn on the canvas so it's in the video.
+function drawFilmCard(p, now) {
+  const { text, sub, from, to } = state.filmCard;
+  const a = Math.min(1, (now - from) / 600, to === Infinity ? 1 : (to - now) / 600);
+  if (a <= 0) { if (now > to) state.filmCard = null; return; }
+  p.push();
+  p.fill(5, 6, 10, 150 * a);
+  p.rect(0, 0, p.width, p.height);
+  p.textAlign(p.CENTER, p.CENTER);
+  p.fill(240, 240, 250, 255 * a);
+  p.textSize(Math.min(40, p.width / 11));
+  p.text(text.split('').join(' '), p.width / 2, p.height * 0.46);
+  p.fill(170, 175, 195, 255 * a);
+  p.textSize(Math.min(15, p.width / 30));
+  p.text(sub, p.width / 2, p.height * 0.46 + 46);
+  p.pop();
 }
 
 // ───────────────────────── sound preview (dev only: /?sounds on localhost) ─────────────────────────
@@ -2451,6 +2557,7 @@ const letterFromLink = linkParams.get('letter');
 const devHost = ['localhost', '127.0.0.1'].includes(location.hostname);
 if (linkParams.has('patterns') && devHost) setTimeout(openPatternViewer, 300);
 else if (linkParams.has('sounds') && devHost) setTimeout(openSoundPreview, 300);
+else if (linkParams.has('record') && devHost) setTimeout(openFilm, 300);
 else if (letterFromLink && /^[a-z0-9]{8}$/.test(letterFromLink)) openLetter(letterFromLink);
 else if (screenFromLink && /^[A-Za-z0-9]{4,8}$/.test(screenFromLink)) openJamScreen(screenFromLink.toUpperCase());
 else if (roomFromLink && /^[A-Za-z0-9]{4,8}$/.test(roomFromLink)) openLobby(roomFromLink.toUpperCase());
