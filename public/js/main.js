@@ -1462,13 +1462,21 @@ function markSeen(id, count) {
 }
 const inboxNote = (text) => { $('inbox-note').textContent = text; };
 
-async function renderLetterTab() {
+// quiet = a background refresh (no "opening…" flash). While the letter tab is open and you're
+// signed in, the inbox refreshes itself every 10 s, so replies appear (with their blue dot).
+async function renderLetterTab(quiet = false) {
   $('inbox-out').hidden = !!me;
   $('inbox-in').hidden = !me;
   $('my-letters').hidden = !!me;
+  clearInterval(state.inboxWatch);
   if (!me) return renderMyLetters();
   $('me-handle').textContent = `@${me.handle}`;
-  $('inbox-list').innerHTML = '<p class="quiet-text">opening your inbox…</p>';
+  if (!quiet) $('inbox-list').innerHTML = '<p class="quiet-text">opening your inbox…</p>';
+  state.inboxWatch = setInterval(() => {
+    const looking = !$('title').hidden && !$('mode-letter').hidden && me;
+    if (looking) renderLetterTab(true);
+    else clearInterval(state.inboxWatch);
+  }, 10_000);
   try {
     const res = await fetch('/api/inbox', { headers: signed() });
     if (res.status === 401) { saveMe(null); inboxNote('your secret word stopped working — open your inbox again'); return renderLetterTab(); }
@@ -1478,11 +1486,11 @@ async function renderLetterTab() {
       const who = e.with.length ? e.with.map((h) => `@${escapeHtml(h)}`).join(', ') : 'via link'; // a letter sent as a link
       const theirs = e.lastFrom !== me.handle;
       const fresh = theirs && e.count > (seen[e.thread] || 0);
-      const what = fresh ? 'new letter ✉' : theirs ? `“${escapeHtml(e.line)}”` : 'waiting for their reply';
-      return `<button data-id="${escapeHtml(e.thread)}" class="${fresh ? 'new' : ''}"><span class="who">${who}</span><span class="what">${what}</span></button>`;
+      const what = fresh ? (e.count > 1 ? 'wrote back ✉' : 'new letter ✉') : theirs ? `“${escapeHtml(e.line)}”` : 'waiting for their reply';
+      return `<button data-id="${escapeHtml(e.thread)}" class="${fresh ? 'new' : ''}"><span class="who">${fresh ? '<span class="dot"></span>' : ''}${who}</span><span class="what">${what}</span></button>`;
     }).join('') : '<p class="quiet-text">no letters yet — write a friend by their name</p>';
   } catch {
-    $('inbox-list').innerHTML = '<p class="quiet-text">couldn’t reach your inbox — try again in a moment</p>';
+    if (!quiet) $('inbox-list').innerHTML = '<p class="quiet-text">couldn’t reach your inbox — try again in a moment</p>';
   }
 }
 $('inbox-list').addEventListener('click', (e) => { const id = e.target.closest('button')?.dataset.id; if (id) openLetter(id); });
@@ -1706,6 +1714,10 @@ async function openLetter(id) {
     return;
   }
   rememberLetter(id, state.thread.letters[0].messages[0]);
+  // Signed in? Opening it is enough: the conversation joins your inbox (on every phone).
+  if (me && !state.thread.people?.includes(me.handle)) {
+    fetch(`/api/letter/${id}/join`, { method: 'POST', headers: { 'content-type': 'application/json', ...signed() }, body: JSON.stringify({ author: deviceId }) }).catch(() => {});
+  }
   const { letters } = state.thread;
   markSeen(id, letters.length);
   const last = letters.at(-1);

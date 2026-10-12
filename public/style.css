@@ -178,15 +178,18 @@ body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bott
 /* inbox: name + words forms, the list of conversations */
 .fields { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .field { font: inherit; font-size: 16px; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; width: 11em; text-align: center; }
-.field.wide { width: 15em; }
+.field.wide { width: 16.5em; }
 button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decoration: underline; font-size: inherit; }
 #phrase-words { color: #ffd27a; font-size: 18px; letter-spacing: 0.06em; margin: 6px 0 10px; }
 #inbox-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 32vh; overflow-y: auto; }
 #inbox-list button { margin: 0; padding: 8px 14px; font-size: 13px; text-align: left; display: flex; justify-content: space-between; gap: 10px; }
 #inbox-list button .who { color: var(--ink); }
 #inbox-list button .what { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#inbox-list button.new { border-color: #ffd27a; }
-#inbox-list button.new .what { color: #ffd27a; }
+#inbox-list button.new { border-color: rgba(111, 182, 255, 0.6); }
+#inbox-list button.new .what { color: #9fd0ff; }
+/* someone wrote back: a little glowing blue dot */
+#inbox-list .dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: #6fb6ff; box-shadow: 0 0 8px #6fb6ff; vertical-align: middle; animation: dotglow 1.6s ease-in-out infinite; }
+@keyframes dotglow { 50% { box-shadow: 0 0 2px #6fb6ff; opacity: 0.7; } }
 /* letters: your conversations on the title screen, and a thread's letters */
 #my-letters { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 #my-letters button { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--dim); border-color: var(--line); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

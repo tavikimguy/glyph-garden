@@ -99,11 +99,12 @@ export default {
       const { author } = (await request.json().catch(() => null)) || {};
       const joined = await env.ROOMS.getByName(`letter:${joinMatch[1]}`).joinThread(me, typeof author === 'string' ? author : '');
       if (!joined) return new Response('no such letter', { status: 404 });
+      // Into your inbox (at the top), and everyone else's row now shows your name (in place).
       const last = joined.letters.at(-1);
-      await env.ROOMS.getByName(`user:${me}`).touchInbox({
-        thread: joinMatch[1], with: joined.people.filter((h) => h !== me), lastFrom: last.from || null,
+      await Promise.all(joined.people.map((h) => env.ROOMS.getByName(`user:${h}`).touchInbox({
+        thread: joinMatch[1], with: joined.people.filter((x) => x !== h), lastFrom: last.from || null,
         count: joined.letters.length, line: last.messages[0], at: last.sent,
-      });
+      }, h !== me)));
       return Response.json({ ok: true });
     }
     const letterMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})$/);
@@ -266,9 +267,16 @@ export class Room extends DurableObject {
     return (await this.ctx.storage.get('inbox')) || [];
   }
 
-  async touchInbox(entry) {
-    const inbox = (await this.getInbox()).filter((e) => e.thread !== entry.thread);
-    await this.ctx.storage.put('inbox', [entry, ...inbox].slice(0, 200));
+  // A conversation changed: it moves to the top (or, keepPlace, just updates where it is).
+  async touchInbox(entry, keepPlace = false) {
+    const inbox = await this.getInbox();
+    const at = inbox.findIndex((e) => e.thread === entry.thread);
+    if (keepPlace && at >= 0) inbox[at] = entry;
+    else {
+      if (at >= 0) inbox.splice(at, 1);
+      inbox.unshift(entry);
+    }
+    await this.ctx.storage.put('inbox', inbox.slice(0, 200));
   }
 
   // room = { mode, seed, players: [{ id, voice, color, entered } | null, …],
