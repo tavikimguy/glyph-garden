@@ -253,23 +253,29 @@ const DRAWINGS = {
     line([0.7, -0.48], [0.81, -0.22], [0.77, -0.06], [0.7, -0.01], [0.63, -0.06], [0.59, -0.22], [0.7, -0.48]),
     line([0.7, -0.3], [0.75, -0.15], [0.7, -0.08], [0.65, -0.15], [0.7, -0.3]),
   ], [C.orange, C.ink, C.ink, C.ink, C.orange, C.cream, C.orange, C.orange, C.orange, C.orange, C.orange, C.red, C.yellow]),
-  shaymin: shape([
-    // white hedgehog body: from where the green back starts, down the face to a little
-    // pointed snout, under the chin, along the belly, and up to the back of the green
-    line([-0.52, 0.18], [-0.66, 0.24], [-0.88, 0.33], [-0.72, 0.42], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
-    tufts(Array.from({ length: 13 }, (_, k) => { // the grassy back, with little spiky tufts
-      const a = Math.PI * (1.02 + (k / 12) * 0.96);
-      return [0.1 + Math.cos(a) * 0.62, 0.2 + Math.sin(a) * 0.52];
-    }), 0.1, 0.2, 0.13),
-    // the flower: a pink starburst (rays start just off the middle, so no glyphs pile up there)
-    ...Array.from({ length: 5 }, (_, k) => {
-      const a = -Math.PI / 2 + (k / 5) * TAU;
-      return [[-0.42 + Math.cos(a) * 0.05, -0.22 + Math.sin(a) * 0.05], [-0.42 + Math.cos(a) * 0.22, -0.22 + Math.sin(a) * 0.22]];
-    }),
-    arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8), // eye
-    arc(-0.88, 0.33, 0.03, 0.03, 0, TAU, 6), // nose
-    ...[-0.38, -0.14, 0.14, 0.38].map((x) => line([x, 0.58], [x, 0.84])), // four little legs
-  ], [C.white, C.green, C.pink, C.pink, C.pink, C.pink, C.pink, C.leaf, C.ink, C.white, C.white, C.white, C.white]),
+  shaymin: (() => {
+    // Drawn level, then the whole body tilts 30° so the head end is higher.
+    const lean = (pts) => tilt(pts, Math.PI / 6);
+    const body = [
+      // white hedgehog body: from where the green back starts, down the face to a little
+      // pointed snout, under the chin, along the belly, and up to the back of the green
+      line([-0.52, 0.18], [-0.66, 0.24], [-0.88, 0.33], [-0.72, 0.42], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
+      tufts(Array.from({ length: 13 }, (_, k) => { // the grassy back, with little spiky tufts
+        const a = Math.PI * (1.02 + (k / 12) * 0.96);
+        return [0.1 + Math.cos(a) * 0.62, 0.2 + Math.sin(a) * 0.52];
+      }), 0.1, 0.2, 0.13),
+      // the flower, on its side (inside the body, so it doesn't sit on the outline's glyphs)
+      polar((a) => 0.24 * (0.28 + 0.72 * Math.abs(Math.cos(a * 2.5 + Math.PI / 2)) ** 0.6), 60).map(([x, y]) => [x - 0.08, y + 0.12]),
+      arc(-0.08, 0.12, 0.05, 0.05, 0, TAU, 6),
+      arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8), // eye
+      arc(-0.88, 0.33, 0.03, 0.03, 0, TAU, 6), // nose
+    ].map(lean);
+    // four little legs, straight down to one ground line (so the back ones are shorter)
+    const tops = [-0.38, -0.14, 0.14, 0.38].map((x) => lean([[x, 0.58]])[0]);
+    const ground = Math.max(...tops.map(([, y]) => y)) + 0.12;
+    const legs = tops.map(([x, y]) => [[x, y], [x, ground]]);
+    return shape([...body, ...legs], [C.white, C.green, C.pink, C.yellow, C.leaf, C.ink, C.white, C.white, C.white, C.white]);
+  })(),
   dog: shape([
     arc(0, 0, 0.5, 0.5),
     arc(-0.55, 0.08, 0.17, 0.38), arc(0.55, 0.08, 0.17, 0.38),
@@ -404,7 +410,7 @@ const MOTION = {
     return [x + Math.sin(t * 1.2) * 0.05, y];
   },
   shaymin: (x, y, t) => {
-    const step = y > 0.6 ? Math.sin(t * 6 + x * 9) * 0.04 : 0; // little legs trot
+    const step = y > 0.55 && x < 0.4 ? Math.sin(t * 6 + x * 9) * 0.04 : 0; // little legs trot
     return [x + Math.sin(t * 0.7) * 0.15 + step, y - Math.abs(Math.sin(t * 1.8)) * 0.06];
   },
   dog: (x, y, t) => {
