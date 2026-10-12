@@ -232,7 +232,8 @@ export function songDNA(messages, options = {}) {
   const odds = Object.entries(STYLE_ODDS[band]).filter(([name]) => !(options.jam && name === 'waltz'));
   let roll = rand() * odds.reduce((n, [, w]) => n + w, 0);
   const rolled = odds.find(([, w]) => (roll -= w) < 0)?.[0] || 'garden';
-  let styleName = options.style || pushed || rolled;
+  // (a re-rolled song — options.shift — lets the dice pick the style too, instead of a pushing word)
+  let styleName = options.style || (options.shift ? rolled : pushed || rolled);
   if (options.jam && styleName === 'waltz') styleName = 'garden'; // a jam's loops are built on 4-beat bars
   const st = STYLES[styleName];
   const within = (list, all) => choose(list || all);
