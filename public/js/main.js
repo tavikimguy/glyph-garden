@@ -24,6 +24,7 @@ const GAME_MODES = {
   diary: { perPlayer: 6, round: 2 }, // just you, 6 lines, a dance every 2
   letter: { perPlayer: 4, round: 4 }, // just you, 4 lines, no dances: straight to the song, then send it
   film: { perPlayer: 2 }, // the promo recording: a scripted duet, 2 lines each, one dance
+  filmstraight: { perPlayer: 2, round: 4 }, // …or with no dance: straight to the song
   // Party: no turns, max 2 each per round. The room decides when a round ends (once
   // everyone has a line in, or after 30 s) and tells every phone; 3 rounds (2 if 5+ people).
   party: { perRound: 2, free: true },
@@ -480,7 +481,11 @@ function startFinale() {
     },
   });
   state.song = song;
-  if (state.filming) { setTimeout(() => { if (state.song === song) endFilm(); }, song.firstPass * 1000); return; }
+  if (state.filming) {
+    const run = state.filming.run;
+    setTimeout(() => { if (state.song === song && state.filming?.run === run) endFilm(); }, song.firstPass * 1000);
+    return;
+  }
   // After the first time through, show the song card — but keep playing.
   setTimeout(() => { if (state.song === song) showEncore(); }, song.firstPass * 1000);
 }
@@ -1261,7 +1266,7 @@ const FILM_SCRIPTS = {
     cards: false, // no title or end card: straight into the garden
   },
   promoduet: {
-    voices: ['marimba', 'flute'], colors: ['sky', 'rose'], cards: false, // the same words, traded back and forth
+    voices: ['synth', 'flute'], colors: ['sky', 'rose'], cards: false, noInterlude: true, // the same words, traded back and forth
     lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'msg me for a link and give it a try!'],
   },
   moon: { voices: ['marimba', 'flute'], colors: ['sky', 'rose'], lines: ['are you awake', 'yes, looking at the moon', 'it looks like a cat', 'meet me by the sea'] },
@@ -1277,27 +1282,39 @@ function openFilm() {
   panel.innerHTML = `<p class="quiet-text">promo recording · portrait 1080×1920 · only the garden and its sound are recorded · keep this tab visible</p>
     <div><select id="film-script">${Object.keys(FILM_SCRIPTS).map((k) => `<option>${k}</option>`).join('')}</select>
     <select id="film-style"><option value="">style: auto</option>${Object.keys(STYLES).map((k) => `<option>${k}</option>`).join('')}</select>
-    <button id="film-go">● record</button></div><p id="film-note" class="quiet-text"></p>`;
+    <label class="quiet-text">dances # <input id="film-seed" class="field" type="number" min="1" value="1" style="width:4.5em;padding:4px 8px"></label>
+    <button id="film-preview" class="quiet">▶ preview</button> <button id="film-go">● record</button></div>
+    <p class="quiet-text">dances # picks the finale's pattern dances (picture words stay); it doesn't change the song</p>
+    <p id="film-note" class="quiet-text"></p>`;
   document.body.append(panel);
-  $('film-go').addEventListener('click', () => startFilm($('film-script').value, $('film-style').value));
+  const go = (record) => startFilm($('film-script').value, $('film-style').value, Number($('film-seed').value) || 1, record);
+  $('film-go').addEventListener('click', () => go(true));
+  $('film-preview').addEventListener('click', () => go(false));
 }
 
-async function startFilm(name, style) {
+async function startFilm(name, style, take = 1, record = true) {
   const script = FILM_SCRIPTS[name];
   await startAudio();
   // the canvas becomes a phone-shaped 540×960 (×2 = 1080×1920), shown scaled to fit
   P.pixelDensity(2);
   P.resizeCanvas(540, 960);
   Object.assign(P.canvas.style, { height: 'min(94vh, 960px)', width: 'auto', display: 'block', margin: '3vh auto 0' });
-  $('pattern-viewer').hidden = true;
-  resetGarden(hash(name) >>> 0);
-  state.mode = script.letter ? 'letter' : 'film';
+  $('pattern-viewer').hidden = !record; // previewing keeps the panel, so you can try the next one
+  if (state.song) stopSong();
+  resetGarden((hash(name) + take * 7919) >>> 0); // the seed picks the dances (and the glyphs), not the song
+  state.mode = script.letter ? 'letter' : script.noInterlude ? 'filmstraight' : 'film';
   state.order = script.letter ? [0] : [0, 1];
-  state.filming = { script, name };
+  state.filming = { script, name, run: (state.filmRuns = (state.filmRuns || 0) + 1) }; // run: so a restarted take ignores the old one's timers
   state.styleOverride = style || undefined;
   state.robots = [...script.voices];
   state.banks = script.voices.map(robotVoice);
   script.colors.forEach((c, i) => { COLORS[i] = PALETTE[c]; });
+  state.filming.record = record;
+  state.phase = 'film';
+  if (script.cards !== false) state.filmCard = { text: 'glyph garden', sub: script.intro || 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
+  const run = state.filming.run;
+  setTimeout(() => { if (state.filming?.run === run) filmNextLine(); }, script.cards === false ? 600 : 2600);
+  if (!record) return;
   // record the canvas + everything the game plays
   const dest = Tone.getContext().rawContext.createMediaStreamDestination();
   Tone.getDestination().connect(dest);
@@ -1317,19 +1334,16 @@ async function startFilm(name, style) {
   };
   state.filming.recorder = recorder;
   recorder.start(1000);
-  state.phase = 'film';
-  if (script.cards !== false) state.filmCard = { text: 'glyph garden', sub: script.intro || 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
-  setTimeout(() => filmNextLine(), script.cards === false ? 600 : 2600);
 }
 
 // The next scripted line flies in (like a sent message) a moment after the last settles.
 function filmNextLine() {
-  const { script } = state.filming;
+  const { script, run } = state.filming;
   const n = state.messages.length;
   if (n >= script.lines.length) return;
   state.phase = 'write';
   show(null);
-  setTimeout(() => { if (state.filming) receive(currentPlayer(), script.lines[n], false); }, n === 0 ? 0 : 1600);
+  setTimeout(() => { if (state.filming?.run === run) receive(currentPlayer(), script.lines[n], false); }, n === 0 ? 0 : 1600);
 }
 
 function endFilm() {
@@ -1338,7 +1352,7 @@ function endFilm() {
   setTimeout(() => {
     stopSong();
     setTimeout(() => {
-      state.filming.recorder.stop();
+      state.filming?.recorder?.stop();
       state.filming = null;
     }, 400);
   }, cards ? 3200 : 1500);
