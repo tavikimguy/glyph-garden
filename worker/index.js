@@ -40,19 +40,32 @@ export default {
       return env.ROOMS.getByName(code).fetch(request);
     }
 
-    // Letters: write 4 lines, send the link, they open it, hear the song, and write back.
-    // POST /api/letter → { id }   GET /api/letter/ID → the letter
+    // Letters: one link per conversation (a thread). You write 4 lines and send the link;
+    // they write back into the same thread; anyone with the link can come back and see it all.
+    //   POST /api/letter          { letter, author } → a new thread, { id }
+    //   POST /api/letter/ID       { letter, author } → added to that thread
+    //   GET  /api/letter/ID       → { id, letters: [...] }
     if (url.pathname === '/api/letter' && request.method === 'POST') {
-      const letter = cleanLetter(await request.json().catch(() => null));
+      const body = await request.json().catch(() => null);
+      const letter = cleanLetter(body?.letter, body?.author);
       if (!letter) return new Response('bad letter', { status: 400 });
       const id = letterId();
-      await env.ROOMS.getByName(`letter:${id}`).saveLetter(letter);
-      return Response.json({ id });
+      await env.ROOMS.getByName(`letter:${id}`).addLetter(letter, false);
+      return Response.json({ id, count: 1 });
     }
     const letterMatch = url.pathname.match(/^\/api\/letter\/([a-z0-9]{8})$/);
     if (letterMatch) {
-      const letter = await env.ROOMS.getByName(`letter:${letterMatch[1]}`).getLetter();
-      return letter ? Response.json({ id: letterMatch[1], ...letter }) : new Response('no such letter', { status: 404 });
+      const [, id] = letterMatch;
+      const thread = env.ROOMS.getByName(`letter:${id}`);
+      if (request.method === 'POST') {
+        const body = await request.json().catch(() => null);
+        const letter = cleanLetter(body?.letter, body?.author);
+        if (!letter) return new Response('bad letter', { status: 400 });
+        const count = await thread.addLetter(letter, true);
+        return count ? Response.json({ id, count }) : new Response('no such letter', { status: 404 });
+      }
+      const letters = await thread.getThread();
+      return letters ? Response.json({ id, letters }) : new Response('no such letter', { status: 404 });
     }
 
     // The word log. POST: count a one-screen game's message. GET: the top words (private).
@@ -75,9 +88,11 @@ export default {
 };
 
 // A letter: up to 4 short lines, the writer's voice + colour, the seed (so the glyphs
-// and the song come out the same for the reader), and which letter it answers.
+// and the song come out the same for the reader), and an author: a random id each device
+// makes for itself (no names, nothing personal), so a device knows which letters were its own.
 const LETTER_LINES = 4;
-function cleanLetter(raw) {
+const THREAD_MAX = 60; // letters kept per conversation
+function cleanLetter(raw, author) {
   if (!raw || !Array.isArray(raw.messages)) return null;
   const messages = raw.messages.slice(0, LETTER_LINES).map((m) => String(m ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)).filter(Boolean);
   if (!messages.length) return null;
@@ -87,7 +102,7 @@ function cleanLetter(raw) {
     voice: word(raw.voice) || 'marimba',
     color: word(raw.color) || 'sky',
     seed: Number.isInteger(raw.seed) ? raw.seed >>> 0 : Math.floor(Math.random() * 2 ** 31),
-    replyTo: typeof raw.replyTo === 'string' && /^[a-z0-9]{8}$/.test(raw.replyTo) ? raw.replyTo : null,
+    author: typeof author === 'string' && /^[a-z0-9]{8,40}$/.test(author) ? author : null,
     sent: Date.now(),
   };
 }
@@ -97,13 +112,22 @@ function letterId() {
 }
 
 export class Room extends DurableObject {
-  // A letter lives in its own little Room (named letter:ID), just stored, no live connection.
-  async saveLetter(letter) {
-    await this.ctx.storage.put('letter', letter);
+  // A letter thread lives in its own little Room (named letter:ID), just stored, no live connection.
+  // (Letters from before threads were stored singly under 'letter': they read as a thread of one.)
+  async getThread() {
+    const letters = await this.ctx.storage.get('letters');
+    if (letters) return letters;
+    const single = await this.ctx.storage.get('letter');
+    return single ? [single] : null;
   }
 
-  async getLetter() {
-    return (await this.ctx.storage.get('letter')) ?? null;
+  // Adds a letter; mustExist = it's a reply (a thread that isn't there → null).
+  async addLetter(letter, mustExist) {
+    const letters = await this.getThread();
+    if (mustExist && !letters) return null;
+    const next = [...(letters || []), letter].slice(-THREAD_MAX);
+    await this.ctx.storage.put('letters', next);
+    return next.length;
   }
 
   // room = { mode, seed, players: [{ id, voice, color, entered } | null, …],

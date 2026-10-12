@@ -221,7 +221,7 @@ function startWriting() {
   $('write-who').textContent = isParty() ? 'say anything — into the void'
     : state.online ? 'your turn'
       : state.mode === 'diary' ? 'dear diary…'
-        : state.mode === 'letter' ? (state.replyTo ? 'write back…' : 'dear you…') : `${NAMES[player]}, say something`;
+        : state.mode === 'letter' ? (state.writingIn ? 'write back…' : 'dear you…') : `${NAMES[player]}, say something`;
   $('write-who').style.color = rgb(COLORS[player]);
   if (!wasWriting) {
     // a fresh message (in a party, a half-typed one survives other people's words)
@@ -507,8 +507,11 @@ function showEncore() {
     .map((m) => `<li style="color:${rgb(COLORS[m.player])}">${escapeHtml(m.text)}</li>`)
     .join('');
   const letter = state.mode === 'letter';
-  $('letter-send').hidden = !letter || !!state.reading;
-  $('letter-reply').hidden = !letter || !state.reading;
+  const reading = letter && state.readingIndex !== null && state.readingIndex !== undefined;
+  const lastIsMine = state.thread ? isMine(state.thread.letters.at(-1)) : true;
+  $('letter-send').hidden = !letter || reading;
+  $('letter-reply').hidden = !reading || lastIsMine; // write back when they wrote last
+  $('letter-back').hidden = !letter || !state.thread;
   $('again').hidden = letter;
 }
 
@@ -1100,7 +1103,7 @@ $('local').addEventListener('click', () => {
 });
 function showLocalSetup() {
   const solo = state.mode === 'diary' || state.mode === 'letter';
-  $('local-mode').textContent = state.mode === 'letter' ? (state.replyTo ? 'letter · writing back' : 'letter') : solo ? 'diary' : 'duet · one screen';
+  $('local-mode').textContent = state.mode === 'letter' ? (state.writingIn ? 'letter · writing back' : 'letter') : solo ? 'diary' : 'duet · one screen';
   $('local-p2').hidden = solo;
   $('player-0').textContent = solo ? 'you' : 'player 1';
   $('begin').textContent = solo ? 'record your own voice instead' : 'record your own voices instead';
@@ -1294,102 +1297,162 @@ function openSoundPreview() {
 }
 
 // ───────────────────────── letters ─────────────────────────
-// Write 4 lines, hear them as a song, send the link. They open it, hear the same song
-// (same seed → same glyphs, same music), and write back the same way.
+// A letter is a conversation with one link. You write 4 lines, hear them as a song, and
+// send the link; they open it, hear the same song (same seed → same glyphs, same music) and
+// write back into the same conversation. Anyone with the link can come back any time and
+// see what's new. Each device makes itself a random id so it knows which letters were its own.
 
-$('letter-write').addEventListener('click', () => {
+const deviceId = (() => {
+  try {
+    let id = localStorage.getItem('glyph-device');
+    if (!id) {
+      id = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+      localStorage.setItem('glyph-device', id);
+    }
+    return id;
+  } catch {
+    return `anon${Math.random().toString(36).slice(2, 12)}`; // private mode: just for this visit
+  }
+})();
+const letterLink = (id) => `${location.origin}${location.pathname}?letter=${id}`;
+const isMine = (letter) => letter.author === deviceId;
+
+// The conversations this device has been part of, newest first (so you can find them again).
+function myLetters() {
+  try { return JSON.parse(localStorage.getItem('glyph-letters') || '[]'); } catch { return []; }
+}
+function rememberLetter(id, line) {
+  try {
+    const list = [{ id, line, at: Date.now() }, ...myLetters().filter((l) => l.id !== id)].slice(0, 12);
+    localStorage.setItem('glyph-letters', JSON.stringify(list));
+  } catch { /* no storage: the link still works */ }
+}
+function renderMyLetters() {
+  const list = myLetters();
+  $('my-letters').innerHTML = list.length
+    ? `<p class="quiet-text">your letters</p>${list.map((l) => `<button data-id="${escapeHtml(l.id)}">“${escapeHtml(l.line || '…')}”</button>`).join('')}`
+    : '';
+}
+$('my-letters').addEventListener('click', (e) => { const id = e.target.closest('button')?.dataset.id; if (id) openLetter(id); });
+
+// Start writing: a new conversation (threadId null) or a reply into one.
+function writeLetter(threadId) {
   resetGarden();
   state.mode = 'letter';
   state.order = [0];
-  state.reading = null;
-  state.replyTo = null;
-  state.letterLink = null;
+  state.readingIndex = null;
+  state.writingIn = threadId;
+  state.sentLink = null;
   $('letter-send').textContent = 'send it ✉';
+  // writing back: start in a different colour from theirs
+  const theirs = state.thread?.letters.findLast((l) => !isMine(l))?.color;
+  if (threadId && COLORS[0] === PALETTE[theirs]) COLORS[0] = Object.values(PALETTE).find((c) => c !== COLORS[0]);
   showLocalSetup();
-});
+}
+$('letter-write').addEventListener('click', () => { state.thread = null; writeLetter(null); });
+$('letter-reply').addEventListener('click', () => writeLetter(state.thread.id));
+$('letter-write-back').addEventListener('click', () => writeLetter(state.thread.id));
 
 $('letter-send').addEventListener('click', async () => {
   const button = $('letter-send');
-  if (!state.letterLink) {
+  if (!state.sentLink) {
     button.textContent = 'sending…';
     try {
-      const res = await fetch('/api/letter', {
+      const letter = {
+        messages: state.messages.map((m) => m.text),
+        voice: state.robots[0],
+        color: Object.keys(PALETTE).find((name) => PALETTE[name] === COLORS[0]),
+        seed: state.seed,
+      };
+      const res = await fetch(state.writingIn ? `/api/letter/${state.writingIn}` : '/api/letter', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          messages: state.messages.map((m) => m.text),
-          voice: state.robots[0],
-          color: Object.keys(PALETTE).find((name) => PALETTE[name] === COLORS[0]),
-          seed: state.seed,
-          replyTo: state.replyTo,
-        }),
+        body: JSON.stringify({ letter, author: deviceId }),
       });
       if (!res.ok) throw new Error(res.status);
       const { id } = await res.json();
-      state.letterLink = `${location.origin}${location.pathname}?letter=${id}`;
+      const earlier = state.thread?.id === id ? state.thread.letters : [];
+      state.thread = { id, letters: [...earlier, { ...letter, author: deviceId }] };
+      rememberLetter(id, state.thread.letters[0].messages[0]);
+      state.sentLink = letterLink(id);
+      try { history.replaceState(null, '', `?letter=${id}`); } catch { /* ignore */ }
+      $('letter-back').hidden = false;
     } catch {
       button.textContent = 'couldn’t send — try again';
       return;
     }
   }
+  await shareLetter(state.writingIn ? 'i wrote back ✉' : 'i wrote you a letter ✉', button);
+});
+
+async function shareLetter(text, button) {
   try {
-    const text = state.replyTo ? 'i wrote back ✉' : 'i wrote you a letter ✉';
-    if (navigator.share) await navigator.share({ title: 'Glyph Garden', text, url: state.letterLink });
+    if (navigator.share) await navigator.share({ title: 'Glyph Garden', text, url: state.sentLink || letterLink(state.thread.id) });
     else {
-      await navigator.clipboard.writeText(state.letterLink);
+      await navigator.clipboard.writeText(state.sentLink || letterLink(state.thread.id));
       button.textContent = 'link copied ✓';
       return;
     }
   } catch { /* they closed the share sheet: the link's still ready */ }
-  button.textContent = 'send it again';
-});
+  button.textContent = button === $('letter-send') ? 'send it again' : 'share the link';
+}
+$('letter-share').addEventListener('click', () => shareLetter('my letter ✉', $('letter-share')));
 
-$('letter-reply').addEventListener('click', () => {
-  const replyTo = state.reading.id;
-  resetGarden();
-  state.mode = 'letter';
-  state.order = [0];
-  state.reading = null;
-  state.replyTo = replyTo;
-  state.letterLink = null;
-  $('letter-send').textContent = 'send it ✉';
-  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
-  // a different colour from theirs, to start with
-  if (COLORS[0] === PALETTE[state.theirColor]) COLORS[0] = Object.values(PALETTE).find((c) => c !== COLORS[0]);
-  showLocalSetup();
-});
-
-// Someone opened a letter link: fetch it, then wait for a tap (sound needs one).
+// A letter link: fetch the whole conversation and show where it's at.
 async function openLetter(id) {
+  if (state.song) stopSong();
   show('letter-open');
   $('letter-from').textContent = 'a letter is on its way…';
-  $('letter-open-btn').hidden = true;
+  for (const b of ['letter-open-btn', 'letter-write-back', 'letter-share', 'letter-thread']) $(b).hidden = true;
+  try { history.replaceState(null, '', `?letter=${id}`); } catch { /* ignore */ }
   try {
     const res = await fetch(`/api/letter/${id}`);
     if (!res.ok) throw new Error(res.status);
-    state.reading = await res.json();
+    const { letters } = await res.json();
+    state.thread = { id, letters };
   } catch {
     $('letter-from').textContent = 'this letter got lost — ask them to send it again';
     return;
   }
-  $('letter-from').textContent = state.reading.replyTo ? 'they wrote back ✉' : 'someone wrote you a letter ✉';
+  rememberLetter(id, state.thread.letters[0].messages[0]);
+  const { letters } = state.thread;
+  const last = letters.at(-1);
+  const mine = isMine(last);
+  $('letter-from').textContent = mine
+    ? (letters.length === 1 ? 'your letter is out there ✉ waiting for them to write back' : 'you wrote last ✉ waiting for their reply')
+    : (letters.length === 1 ? 'someone wrote you a letter ✉' : 'they wrote back ✉');
+  $('letter-open-btn').textContent = mine ? 'hear yours again' : 'open it';
   $('letter-open-btn').hidden = false;
+  $('letter-write-back').hidden = mine;
+  $('letter-share').hidden = !mine;
+  $('letter-thread').hidden = letters.length < 2;
+  $('letter-list').innerHTML = letters.map((l, i) => `<button data-i="${i}" style="color:${rgb(PALETTE[l.color] || COLORS[0])}">${i + 1} · ${isMine(l) ? 'you' : 'them'}</button>`).join('');
 }
+$('letter-open-btn').addEventListener('click', () => playLetter(state.thread.letters.length - 1));
+$('letter-list').addEventListener('click', (e) => { const i = e.target.closest('button')?.dataset.i; if (i !== undefined) playLetter(Number(i)); });
+$('letter-back').addEventListener('click', () => openLetter(state.thread.id)); // fetch again: maybe they've written back
+$('letter-home').addEventListener('click', () => {
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+  show('title');
+  pickMode('letter');
+});
 
-$('letter-open-btn').addEventListener('click', async () => {
+// Hear letter i of the conversation: its words fly in, then its song plays.
+async function playLetter(i) {
   await startAudio();
-  const letter = state.reading;
+  const letter = state.thread.letters[i];
   resetGarden(letter.seed);
   state.mode = 'letter';
   state.order = [0];
-  state.theirColor = letter.color;
+  state.readingIndex = i;
+  state.writingIn = null;
   if (PALETTE[letter.color]) COLORS[0] = PALETTE[letter.color];
   state.banks[0] = robotVoice(letter.voice);
   state.started = true;
   show(null);
   for (const text of letter.messages) receive(0, text, true);
   setTimeout(startFinale, 1500); // let the words fly in first
-});
+}
 
 $('replay').addEventListener('click', () => {
   if (state.song) stopSong();
@@ -1628,6 +1691,7 @@ function pickMode(mode) {
   document.querySelector('.modes').style.setProperty('--i', tabs.findIndex((b) => b.dataset.mode === mode)); // slide the pill
   $('mode-blurb').textContent = BLURBS[mode];
   for (const m of ['duet', 'party', 'diary', 'jam', 'letter']) $(`mode-${m}`).hidden = m !== mode;
+  if (mode === 'letter') renderMyLetters();
   $('join-form').hidden = mode === 'diary' || mode === 'letter';
   $('local').hidden = mode !== 'duet';
 }

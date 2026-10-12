@@ -40,6 +40,7 @@
     </div>
     <div id="mode-letter" hidden>
       <button id="letter-write">write a letter</button>
+      <div id="my-letters"></div>
     </div>
     <div id="mode-jam" hidden>
       <button id="host-jam">be the screen</button>
@@ -168,9 +169,18 @@
 
   <!-- a letter link: open it to hear their song -->
   <section id="letter-open" class="panel" hidden>
+    <button id="letter-home" class="quiet back">← home</button>
     <p class="mode">letter</p>
     <h2 id="letter-from"></h2>
-    <button id="letter-open-btn" hidden>open it</button>
+    <div class="row">
+      <button id="letter-open-btn" hidden>open it</button>
+      <button id="letter-write-back" class="quiet" hidden>write back ✉</button>
+      <button id="letter-share" class="quiet" hidden>share the link</button>
+    </div>
+    <div id="letter-thread" hidden>
+      <p class="quiet-text">the whole conversation · tap one to hear it</p>
+      <div id="letter-list" class="row"></div>
+    </div>
   </section>
 
   <section id="end" class="panel bottom encore" hidden>
@@ -186,6 +196,7 @@
       <button id="again" class="quiet">play again</button>
       <button id="letter-send" hidden>send it ✉</button>
       <button id="letter-reply" hidden>write back ✉</button>
+      <button id="letter-back" class="quiet" hidden>all letters</button>
     </div>
   </section>
 
