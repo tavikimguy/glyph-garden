@@ -1257,8 +1257,8 @@ function openPatternViewer() {
 const FILM_SCRIPTS = {
   promo: {
     letter: true, voices: ['marimba'], colors: ['sky'],
-    lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'i’m still working on it but dm me for a link!'],
-    intro: 'a letter, written in glyphs…', outro: 'dm me for a link ✉',
+    lines: ['hey guys, this is a game I made based on glyphs', 'you can send letters to your friends', 'and make awesome songs together', 'msg me for a link and give it a try!'],
+    cards: false, // no title or end card: straight into the garden
   },
   moon: { voices: ['marimba', 'flute'], colors: ['sky', 'rose'], lines: ['are you awake', 'yes, looking at the moon', 'it looks like a cat', 'meet me by the sea'] },
   pizza: { voices: ['keys', 'steelpan'], colors: ['gold', 'mint'], lines: ['i made you a pizza', 'with olives?', 'of course, and my heart', 'best day ever'] },
@@ -1314,8 +1314,8 @@ async function startFilm(name, style) {
   state.filming.recorder = recorder;
   recorder.start(1000);
   state.phase = 'film';
-  state.filmCard = { text: 'glyph garden', sub: script.intro || 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
-  setTimeout(() => filmNextLine(), 2600);
+  if (script.cards !== false) state.filmCard = { text: 'glyph garden', sub: script.intro || 'two people write. the words get lost in translation…', from: P.millis(), to: P.millis() + 3200 };
+  setTimeout(() => filmNextLine(), script.cards === false ? 600 : 2600);
 }
 
 // The next scripted line flies in (like a sent message) a moment after the last settles.
@@ -1329,14 +1329,15 @@ function filmNextLine() {
 }
 
 function endFilm() {
-  state.filmCard = { text: 'glyph garden', sub: state.filming.script.outro || 'glyph-garden.tavikim.workers.dev', from: P.millis(), to: Infinity };
+  const cards = state.filming.script.cards !== false;
+  if (cards) state.filmCard = { text: 'glyph garden', sub: state.filming.script.outro || 'glyph-garden.tavikim.workers.dev', from: P.millis(), to: Infinity };
   setTimeout(() => {
     stopSong();
     setTimeout(() => {
       state.filming.recorder.stop();
       state.filming = null;
     }, 400);
-  }, 3200);
+  }, cards ? 3200 : 1500);
 }
 
 // A title over the garden (fades in and out), drawn on the canvas so it's in the video.
