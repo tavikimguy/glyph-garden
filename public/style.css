@@ -156,8 +156,9 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
 
 #write-count.near { color: #ffd27a; }
 
-/* ── phones: the page never scrolls ── */
-html, body { position: fixed; inset: 0; overscroll-behavior: none; }
+/* ── phones: the page never scrolls, and never changes height when the keyboard opens:
+   it's locked to the screen's height (--app-h, set in main.js) and the keyboard slides over it ── */
+html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: var(--app-h, 100%); overflow: hidden; overscroll-behavior: none; }
 @media (max-width: 600px) {
   #key { max-width: calc(100vw - 24px); justify-content: center; left: 12px; right: 12px; }
   #status { top: auto; bottom: calc(110px + env(safe-area-inset-bottom)); }

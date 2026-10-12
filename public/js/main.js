@@ -971,7 +971,7 @@ function sketch(p) {
   P = p;
 
   p.setup = () => {
-    p.createCanvas(window.innerWidth, window.innerHeight).parent('stage');
+    p.createCanvas(window.innerWidth, appHeight).parent('stage');
     p.textFont('JetBrains Mono'); // loaded in index.html
     p.textAlign(p.CENTER, p.CENTER);
     for (let i = 0; i < 220; i++) {
@@ -979,7 +979,12 @@ function sketch(p) {
     }
   };
 
-  p.windowResized = () => p.resizeCanvas(window.innerWidth, window.innerHeight);
+  p.windowResized = () => {
+    if (keyboardUp()) return; // a keyboard opening isn't a resize: the garden keeps its full height
+    appHeight = window.innerHeight;
+    document.documentElement.style.setProperty('--app-h', `${appHeight}px`);
+    p.resizeCanvas(window.innerWidth, appHeight);
+  };
 
   p.draw = () => {
     p.background(5, 6, 10);
@@ -2165,6 +2170,17 @@ if (Recognition || canRecord) {
 // way never has to. The tap is caught before the browser focuses the box, so iOS doesn't
 // shove the whole page up either: we move the box first, then focus it without scrolling.
 const touchUI = matchMedia('(pointer: coarse)').matches;
+// The whole page is locked to the screen's height from the start (see --app-h in style.css),
+// so the keyboard slides over the garden instead of squashing or stretching it.
+let appHeight = window.innerHeight;
+document.documentElement.style.setProperty('--app-h', `${appHeight}px`);
+const keyboardUp = () => ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) && touchUI;
+// iOS can still slide the page into the empty space behind the keyboard: snap it back.
+window.visualViewport?.addEventListener('scroll', () => { if (window.visualViewport.offsetTop > 0) window.scrollTo(0, 0); });
+// …and dragging the background never scrolls anything (lists inside panels still scroll).
+document.addEventListener('touchmove', (e) => {
+  if (!e.target.closest?.('.panel, #pattern-viewer, .symbol-strip, details')) e.preventDefault();
+}, { passive: false });
 function setComposing(on) {
   if (!touchUI || document.body.classList.contains('composing') === on) return;
   const box = $('write');
