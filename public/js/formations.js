@@ -1,12 +1,6 @@
-// Interlude dances. Each pattern says where glyph g wants to be at time t;
-// glyphs steer toward that point, so every pattern flows instead of snapping.
-// `setup(rand)` rolls the settings so the same pattern looks different each time;
-// rand is seeded, so both players' screens roll the very same settings.
-//
-// Glyph fields used: fi (index among all), fj (index within its side),
-// fm (index within its message), side (0/1: players split into two groups —
-// in a duet that's simply player 1 vs player 2), msg.
-// ctx: { W, H, cx, cy, R (comfortable radius), n, counts: [p1, p2], msgs, msgSize: [] }
+// Each pattern returns a target point for glyph g at time t; glyphs steer toward it.
+// setup(rand) is seeded so both screens roll the same settings.
+// Glyph fields: fi (global index), fj (index within side), fm (index within message), side (0/1), msg.
 
 import { PICTURES } from './pictures.js';
 
@@ -16,7 +10,6 @@ const dir = (rand) => (rand() < 0.5 ? -1 : 1);
 const TAU = Math.PI * 2;
 
 export const FORMATIONS = {
-  // Sunflower: the golden-angle spiral seeds grow in, slowly turning.
   sunflower: {
     setup: (rand) => ({ spin: dir(rand) * between(rand, 0.3, 0.7) }),
     at: (g, t, c, v) => {
@@ -26,20 +19,18 @@ export const FORMATIONS = {
     },
   },
 
-  // Galaxy: a few curved arms sweeping around the centre.
   galaxy: {
     setup: (rand) => ({ arms: pick(rand, [2, 3, 4, 5]), twist: between(rand, 2, 4) * dir(rand), spin: dir(rand) * between(rand, 0.2, 0.5) }),
     at: (g, t, c, v) => {
       const arm = g.fi % v.arms;
       const k = Math.floor(g.fi / v.arms) / Math.max(1, c.n / v.arms);
-      const fluff = ((Math.sin(g.fi * 12.9898) * 43758.5453) % 1 + 1) % 1 - 0.5; // steady random scatter off the arm
+      const fluff = ((Math.sin(g.fi * 12.9898) * 43758.5453) % 1 + 1) % 1 - 0.5;
       const r = (0.08 + 0.92 * k) * c.R * (1 + fluff * 0.25);
       const a = (arm / v.arms) * TAU + k * v.twist + t * v.spin + fluff * 0.35;
       return [c.cx + Math.cos(a) * r, c.cy + Math.sin(a) * r];
     },
   },
 
-  // Helix: one strand per player, weaving around each other — the duet.
   helix: {
     setup: (rand) => ({ twists: between(rand, 1.5, 3), speed: dir(rand) * between(rand, 1.5, 2.5), tilt: between(rand, -0.25, 0.25) }),
     at: (g, t, c, v) => {
@@ -50,7 +41,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Orbits: one ring per message, neighbouring rings turning opposite ways.
   orbits: {
     setup: (rand) => ({ spin: between(rand, 0.3, 0.7), squash: between(rand, 0.6, 1) }),
     at: (g, t, c, v) => {
@@ -60,7 +50,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Wave: a grid rippling like a flag in wind.
   wave: {
     setup: (rand) => ({ freq: between(rand, 0.3, 0.7), speed: between(rand, 2, 4), height: between(rand, 0.02, 0.05) }),
     at: (g, t, c, v) => {
@@ -74,7 +63,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Heart: the two players trace one heart from opposite sides.
   heart: {
     setup: (rand) => ({ speed: dir(rand) * between(rand, 0.15, 0.3), beat: between(rand, 1.5, 2.5) }),
     at: (g, t, c, v) => {
@@ -88,7 +76,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Lissajous: one looping curve, with a different knot every time.
   lissajous: {
     setup: (rand) => ({ ratio: pick(rand, [[1, 2], [3, 2], [2, 3]]), speed: dir(rand) * between(rand, 0.2, 0.4) }),
     at: (g, t, c, v) => {
@@ -98,7 +85,7 @@ export const FORMATIONS = {
     },
   },
 
-  // Rose: petals drawn by r = cos(kθ), slowly turning.
+  // r = cos(k * theta)
   rose: {
     setup: (rand) => ({ k: pick(rand, [2, 3, 4, 5, 6, 7]), spin: dir(rand) * between(rand, 0.15, 0.35) }),
     at: (g, t, c, v) => {
@@ -109,7 +96,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Binary stars: each player circles their own point; the two points circle each other.
   binary: {
     setup: (rand) => ({ spin: dir(rand) * between(rand, 0.3, 0.6), inner: dir(rand) * between(rand, 0.8, 1.4) }),
     at: (g, t, c, v) => {
@@ -122,7 +108,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Conversation: two clusters leaning toward each other in turn, like talking.
   conversation: {
     setup: (rand) => ({ speed: between(rand, 1.5, 2.5), lean: between(rand, 0.06, 0.12) }),
     at: (g, t, c, v) => {
@@ -135,7 +120,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Starburst: rays from the centre, turning and stretching.
   starburst: {
     setup: (rand) => ({ rays: pick(rand, [6, 8, 10, 12]), spin: dir(rand) * between(rand, 0.1, 0.3), breathe: between(rand, 1, 2) }),
     at: (g, t, c, v) => {
@@ -147,7 +131,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Bloom: concentric rings that breathe in and out one after another.
   bloom: {
     setup: (rand) => ({ rings: pick(rand, [4, 5, 6]), speed: between(rand, 1.5, 3), spin: dir(rand) * between(rand, 0.1, 0.3) }),
     at: (g, t, c, v) => {
@@ -160,7 +143,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Tornado: a funnel spinning around a vertical axis, wide at the top.
   tornado: {
     setup: (rand) => ({ spin: dir(rand) * between(rand, 1.5, 2.5), sway: between(rand, 20, 60) }),
     at: (g, t, c, v) => {
@@ -172,7 +154,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Ribbons: one sine ribbon per message, stacked, each with its own phase.
   ribbons: {
     setup: (rand) => ({ speed: dir(rand) * between(rand, 1.5, 3), waves: between(rand, 1, 2.5) }),
     at: (g, t, c, v) => {
@@ -182,7 +163,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Infinity: a figure-eight, the two players chasing each other around it.
   infinity: {
     setup: (rand) => ({ speed: dir(rand) * between(rand, 0.25, 0.5) }),
     at: (g, t, c, v) => {
@@ -193,7 +173,6 @@ export const FORMATIONS = {
     },
   },
 
-  // Pulse grid: a square lattice, turning slowly, waves of pressure through it.
   lattice: {
     setup: (rand) => ({ spin: dir(rand) * between(rand, 0.1, 0.25), speed: between(rand, 2, 3) }),
     at: (g, t, c, v) => {
@@ -208,7 +187,6 @@ export const FORMATIONS = {
   },
 };
 
-// The heart is drawn by its own formula above, but it counts as a picture.
 export const PATTERN_NAMES = Object.keys(FORMATIONS).filter((name) => name !== 'heart');
 export const PICTURE_NAMES = [...Object.keys(PICTURES), 'heart'];
-Object.assign(FORMATIONS, PICTURES); // fish, bird, butterfly, flower, moon, star, sun, note, cat, boat, eye, tree
+Object.assign(FORMATIONS, PICTURES);

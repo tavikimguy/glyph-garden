@@ -1,20 +1,11 @@
-// Song DNA: the conversation decides what the final song sounds like.
-// The same words always make the same song; different words, a different song.
-//
-//   mood words      → key "colour" (bright lydian … dark phrygian)
-//   energy (!, CAPS, short bursts, party words) → tempo + busier drums
-//   the exact text  → a seed that picks key, chords, kit, beat, instruments
-//   secret words    → hidden twists (and the end screen counts how many you found)
-//   style           → the top gene: a flavour of the garden (lo-fi, bossa, waltz…) that
-//                     sets tempo, groove, space and texture; the dice vary things inside it
+// Turns the conversation into song settings. Same words, same song.
 
 import { hash } from './glyphs.js';
 import { PICTURE_WORDS } from './pictures.js';
 
-// Every picture's words are secret words too (they draw something in the dance).
 const PICTURE_WORD_SET = new Set(Object.values(PICTURE_WORDS).flat());
 
-// Scales as semitone steps. `penta` = the 5 safest notes for singing.
+// Semitone steps. `penta` is the safe set for singing.
 export const MODES = {
   lydian: { steps: [0, 2, 4, 6, 7, 9, 11], penta: [0, 1, 2, 4, 5], feel: 'dreamy' },
   major: { steps: [0, 2, 4, 5, 7, 9, 11], penta: [0, 1, 2, 4, 5], feel: 'bright' },
@@ -24,7 +15,7 @@ export const MODES = {
   phrygian: { steps: [0, 1, 3, 5, 7, 8, 10], penta: [0, 2, 3, 4, 6], feel: 'mysterious' },
 };
 
-// Chord progressions as scale degrees (0 = home chord).
+// Scale degrees, 0 = tonic.
 const PROGRESSIONS = [
   [0, 5, 3, 4], [0, 3, 5, 4], [5, 3, 0, 4], [0, 4, 5, 3],
   [1, 4, 0, 0], [0, 3, 0, 4], [0, 6, 5, 4], [3, 4, 2, 5],
@@ -39,18 +30,10 @@ const KITS = {
 };
 const LEADS = ['mallet', 'bells', 'kalimba', 'glass', 'chip', 'harp'];
 
-// Styles: flavours of the same garden (the rain, the plinks and the reverb stay), each a
-// matching bundle so a song has a clear identity instead of an average of random picks.
-//   bpm      tempo range (energy picks low or high inside it)
-//   patterns drum beats · padMode: hold (long chords) | stab (short comping) | waltz (pah-pah)
-//   bassStyle the bass rhythm (roots = the original) · space: reverb amount 0–1
-//   tone     muffle (lo-fi) | crunch (chip)
-//   meters   beats per bar: 4 = 4/4, 3 = 3/4, 6 = 6/8, 5 = 5/4, 7 = 7/8 (one is rolled)
-//   rhythms  how the players' lines are sung (RHYTHMS) · contours: the melody's shape
-//   voice    a colour on the players' own instruments · harmony: a soft second line under the melody
-// A list left out = anything goes (the original garden behaviour).
+// Each style is a bundle so songs have a clear identity. Missing lists mean anything goes.
+// padMode: hold | stab | waltz. space: reverb 0-1. meters: beats per bar (6 = 6/8, 7 = 7/8).
 export const STYLES = {
-  garden: { meters: [4, 4, 4, 3, 6, 5, 7] }, // the original sound, everything rolled freely (any rhythm, any shape)
+  garden: { meters: [4, 4, 4, 3, 6, 5, 7] },
   drift: {
     meters: [4, 6, 5], rhythms: ['lazy', 'dotted', 'straight'], contours: ['wave', 'walk'], voice: 'shimmer', harmony: ['octave', null],
     bpm: [64, 78], kits: ['tick', 'soft'], patterns: ['sparse'], leads: ['glass', 'bells'], pads: ['choir', 'warm', 'strings'],
@@ -82,28 +65,27 @@ export const STYLES = {
     basses: ['round'], arps: ['up', 'updown'], arpRate: 2, swing: [0, 0], space: 0.55, padMode: 'waltz', bassStyle: 'waltz',
   },
 };
-// How a line is sung: note lengths in 16th steps, cycling through the line (the last note rings).
+// Note lengths in 16th steps, cycled through the line.
 export const RHYTHMS = {
-  straight: [2], // even 8ths (the original)
-  dotted: [3, 3, 2], // the tresillo: long, long, short
-  longshort: [3, 1], // a lazy swing
-  lazy: [4, 2], // half a beat behind
-  skip: [1, 1, 2], // quick-quick-slow
-  triplet: [4 / 3, 4 / 3, 4 / 3], // three to a beat
-  sync: [1, 2, 1, 2, 2], // syncopated: notes land between the beats
+  straight: [2],
+  dotted: [3, 3, 2], // tresillo
+  longshort: [3, 1],
+  lazy: [4, 2],
+  skip: [1, 1, 2],
+  triplet: [4 / 3, 4 / 3, 4 / 3],
+  sync: [1, 2, 1, 2, 2],
 };
 const CONTOURS = ['walk', 'arp', 'wave', 'pedal'];
-// What the different time signatures play, and what to call them.
 const METER_BEATS = { 3: 'waltz', 6: 'sixeight', 5: 'five', 7: 'seven' };
 const METER_NAMES = { 3: '3/4', 4: '4/4', 5: '5/4', 6: '6/8', 7: '7/8' };
 
-// How likely each style is, by the conversation's energy (calm · normal · hype).
+// Weights per energy band: calm, normal, hype.
 const STYLE_ODDS = {
   calm: { garden: 3, drift: 3, lofi: 3, waltz: 2, bossa: 1 },
   normal: { garden: 3, lofi: 2, bossa: 3, pulse: 2, waltz: 1, drift: 1 },
   hype: { garden: 2, pulse: 3, chip: 2, bossa: 1 },
 };
-// Words that push a song toward a style (the first one said wins).
+// First matching word wins.
 const STYLE_WORDS = {
   party: 'pulse', dance: 'pulse', club: 'pulse', disco: 'pulse',
   sleep: 'drift', sleepy: 'drift', dream: 'drift', dreams: 'drift', space: 'drift', float: 'drift',
@@ -126,8 +108,7 @@ const SAD = new Set(['miss', 'sad', 'sorry', 'tired', 'alone', 'cry', 'lost', 'h
 const HYPE = new Set(['party', 'dance', 'omg', 'wow', 'lets', "let's", 'go', 'now', 'run', 'fast', 'wild',
   'crazy', 'yeah', 'hell', 'hype', 'woo']);
 
-// The feeling of one message, for how its glyphs move:
-// 'excited' (!, CAPS, hype words) spin · 'happy' bounce · 'sad' sink · 'calm' drift.
+// Mood of one message, drives how its glyphs move.
 export function messageMood(text) {
   const words = text.toLowerCase().match(/[a-z']+/g) || [];
   let mood = 0;
@@ -143,10 +124,8 @@ export function messageMood(text) {
   return 'calm';
 }
 
-// Secret words → hidden twists. Players are never told the list.
-// Each is a recipe of ingredients. Ingredients STACK: the first secret to name a
-// lead / pad / kit / bass gets it, and a later secret with a different one is
-// layered on top (a second lead, a second drum kit's snare + hats…). Numbers add up.
+// Hidden twists. Ingredients stack: the first secret to set a lead/pad/kit/bass gets it,
+// later ones get layered on top. Numbers add.
 const SECRETS = {
   rain: { rain: 2, delayTime: '8n.' },
   storm: { rain: 2, kit: 'glitch' },
@@ -168,12 +147,11 @@ const SECRETS = {
   play: { lead: 'chip' },
   ghost: { darker: 1, lead: 'glass', echo: 0.2 },
   home: { pad: 'organ', kit: 'soft' },
-  frog: { lead: 'kalimba', bass: 'pluck', swing: 0.2, bpm: 6 }, // a little hoppy and bouncy
-  cloud: { pad: 'choir', echo: 0.2, bpm: -8, brighter: 1 }, // soft and floaty
+  frog: { lead: 'kalimba', bass: 'pluck', swing: 0.2, bpm: 6 },
+  cloud: { pad: 'choir', echo: 0.2, bpm: -8, brighter: 1 },
 };
 const CATEGORIES = ['lead', 'pad', 'kit', 'bass', 'arp', 'delayTime'];
 
-// Is this word a secret (it changes the song, or draws a picture)? The garden reveals it.
 export const isSecretWord = (word) => !!SECRETS[word] || PICTURE_WORD_SET.has(word);
 
 function applySecret(d, recipe, claimed) {
@@ -183,7 +161,7 @@ function applySecret(d, recipe, claimed) {
       d[key] = recipe[key];
       claimed.add(key);
     } else if (d[key] !== recipe[key]) {
-      d.layers[key] ??= recipe[key]; // already taken → play it as an extra layer
+      d.layers[key] ??= recipe[key]; // slot taken, layer it
     }
   }
   d.darker += recipe.darker || 0;
@@ -195,7 +173,6 @@ function applySecret(d, recipe, claimed) {
   if (recipe.arpRate) d.arpRate = recipe.arpRate;
 }
 
-// Seeded random: same text → same "random" choices.
 function rng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -206,9 +183,8 @@ function rng(seed) {
   };
 }
 
-// options.style forces a style (the sound preview); options.shift re-rolls every choice for the
-// same words (the promo recorder's "song #"; 0 = the normal song); options.jam leaves out waltz time
-// (a jam's loops are built on 4-beat bars).
+// options.style forces a style, options.shift re-rolls everything for the same words,
+// options.jam skips waltz since jam loops assume 4-beat bars.
 export function songDNA(messages, options = {}) {
   const text = messages.map((m) => m.text).join(' / ');
   const words = text.toLowerCase().match(/[a-z']+/g) || [];
@@ -224,20 +200,18 @@ export function songDNA(messages, options = {}) {
     if (HYPE.has(w)) energy += 2;
   }
   energy += (text.match(/!/g) || []).length * 2;
-  energy += (text.match(/\b[A-Z]{2,}\b/g) || []).length * 2; // SHOUTING
+  energy += (text.match(/\b[A-Z]{2,}\b/g) || []).length * 2; // all caps
   const avgLen = messages.reduce((n, m) => n + m.text.length, 0) / Math.max(1, messages.length);
-  if (avgLen < 18) energy += 3; // quick back-and-forth
-  if (avgLen > 45) energy -= 3; // long, thoughtful messages
+  if (avgLen < 18) energy += 3;
+  if (avgLen > 45) energy -= 3;
 
-  // The style comes first: a word that pushes one, or the dice weighted by energy.
   const band = energy >= 6 ? 'hype' : energy >= 2 ? 'normal' : 'calm';
   const pushed = words.map((w) => STYLE_WORDS[w]).find(Boolean);
   const odds = Object.entries(STYLE_ODDS[band]).filter(([name]) => !(options.jam && name === 'waltz'));
   let roll = rand() * odds.reduce((n, [, w]) => n + w, 0);
   const rolled = odds.find(([, w]) => (roll -= w) < 0)?.[0] || 'garden';
-  // (a re-rolled song — options.shift — lets the dice pick the style too, instead of a pushing word)
   let styleName = options.style || (options.shift ? rolled : pushed || rolled);
-  if (options.jam && styleName === 'waltz') styleName = 'garden'; // a jam's loops are built on 4-beat bars
+  if (options.jam && styleName === 'waltz') styleName = 'garden';
   const st = STYLES[styleName];
   const within = (list, all) => choose(list || all);
 
@@ -270,24 +244,21 @@ export function songDNA(messages, options = {}) {
     darker: st.darker || 0,
     bpmShift: 0,
     secrets: [],
-    layers: {}, // extra sounds from secrets that stacked on top (e.g. a second lead)
+    layers: {},
   };
 
-  // Secret words, in the order they were said, each once — and they stack.
   const claimed = new Set();
   for (const w of new Set(words)) {
-    if (SECRETS[w] && !options.shift) applySecret(d, SECRETS[w], claimed); // a re-rolled song keeps its own sounds
+    if (SECRETS[w] && !options.shift) applySecret(d, SECRETS[w], claimed);
     if (SECRETS[w] || PICTURE_WORD_SET.has(w)) d.secrets.push(w);
   }
 
-  // Mood → mode, from brightest to darkest.
   const ladder = ['lydian', 'major', 'mixolydian', 'dorian', 'minor', 'phrygian'];
   const base = mood >= 2 ? 0.5 : mood === 1 ? 1.5 : mood === 0 ? 2.5 : mood === -1 ? 3.5 : 4.5;
   const step = Math.round(base + (rand() - 0.5) + d.darker - d.brighter);
   d.mode = ladder[Math.max(0, Math.min(ladder.length - 1, step))];
 
-  // Energy → tempo; the kit's beat comes from the kit's own repertoire.
-  // Energy → tempo: the original bands, or (in a style) low / middle / high inside its range.
+  // Styles pick low/mid/high inside their bpm range; no style falls back to fixed bands.
   let bpm;
   if (st.bpm) {
     const [lo, hi] = st.bpm;
@@ -297,7 +268,7 @@ export function songDNA(messages, options = {}) {
   const [floor, ceiling] = st.bpm ? [st.bpm[0] - 10, st.bpm[1] + 10] : [80, 150];
   d.bpm = Math.round(Math.max(floor, Math.min(ceiling, bpm + d.bpmShift)));
   d.pattern = st.patterns ? choose(st.patterns) : choose(KITS[d.kit] || KITS.soft);
-  if (d.meter !== 4 && !(d.meter === 3 && d.pattern === 'waltz')) d.pattern = METER_BEATS[d.meter]; // odd meters get their own beat
+  if (d.meter !== 4 && !(d.meter === 3 && d.pattern === 'waltz')) d.pattern = METER_BEATS[d.meter];
   d.meterName = METER_NAMES[d.meter];
   if (energy >= 6 && d.arpRate === 2 && rand() < 0.6) d.arpRate = 1;
 

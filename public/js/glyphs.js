@@ -1,5 +1,4 @@
-// Letters → glyphs. Each session invents its own cipher: every letter always
-// becomes the same symbol, so patterns repeat like a real (unreadable) language.
+// Per-session cipher: each letter always maps to the same symbol.
 
 const FAMILIES = {
   ascii: [...'!#$%&*+/<=>?@[]^{}|~\\();:'],
@@ -13,19 +12,19 @@ const FAMILIES = {
   sky: [...'☉☽☾☿♁♃♄♅♆♇☊☋♩♪♫♬♭♮♯'],
   marks: [...'§¶¤°¿¡«»†‡⌘∿≋⌀⌇⌁⌂⌬'],
 };
-const NEEDED = 36; // 26 letters + 10 digits
-export const SYMBOLS = Object.values(FAMILIES).flat(); // every glyph (a jam's random picks come from here)
+const NEEDED = 36;
+export const SYMBOLS = Object.values(FAMILIES).flat();
 
-let current = FAMILIES.ascii; // this session's glyphs (also used for the scramble effect)
+let current = FAMILIES.ascii;
 
-// Small deterministic hash, so the same symbol always plays the same note.
+// Deterministic hash so a symbol always plays the same note.
 export function hash(str) {
   let h = 2166136261;
   for (const ch of str) h = Math.imul(h ^ ch.codePointAt(0), 16777619);
   return h >>> 0;
 }
 
-// Seeded random: the same seed gives the same "random" picks on every phone.
+// Seeded so every phone gets the same picks.
 export function seededRandom(seed) {
   let s = seed >>> 0;
   return () => {
@@ -45,12 +44,11 @@ function shuffled(list, rand = Math.random) {
   return out;
 }
 
-// Every session mixes the core families (ascii, arrows, math, stars) with one
-// rotating guest family, taking a different random handful from each.
+// Core families plus one rotating guest family.
 const CORE = { ascii: 9, arrows: 6, math: 7, stars: 5 };
 const GUESTS = ['geometry', 'lines', 'runes', 'braille', 'sky', 'marks'];
 
-// Pass a seed so both players in an online duet get the very same cipher.
+// Seeded so both players in an online duet share the cipher.
 export function makeCipher(seed = Math.floor(Math.random() * 2 ** 31)) {
   const rand = seededRandom(seed);
   const guest = GUESTS[Math.floor(rand() * GUESTS.length)];
@@ -66,7 +64,7 @@ export function makeCipher(seed = Math.floor(Math.random() * 2 ** 31)) {
   return cipher;
 }
 
-// Anything else (punctuation, accents) becomes a dot — one per character, big enough to see.
+// Anything else (punctuation, accents) becomes a dot, one per character.
 export function encode(cipher, ch) {
   return cipher[ch.toLowerCase()] || '•';
 }

@@ -6,7 +6,7 @@
 }
 
 * { box-sizing: border-box; }
-[hidden] { display: none !important; } /* hidden always wins over a layout style */
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -109,10 +109,10 @@ details summary { cursor: pointer; }
 #end-lyrics { list-style: none; padding: 0; margin: 8px 0; text-align: left; max-height: 30vh; overflow-y: auto; }
 #end-lyrics li { margin: 10px 0; font-size: 16px; }
 
-/* ── duet hub, lobby, compose bar ── */
+/* lobby, compose bar */
 .mode { text-transform: uppercase; letter-spacing: 0.35em; font-size: 11px; color: var(--dim); margin: -6px 0 14px; }
 .join { gap: 6px; align-items: center; margin: 4px 0; }
-.join input, #message { font-size: 16px; } /* 16px+ stops iPhone zooming in on focus */
+.join input, #message { font-size: 16px; } /* under 16px, iOS zooms on focus */
 .join input {
   width: 7.5em; text-align: center; letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; font-family: inherit;
@@ -132,7 +132,7 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
   width: max-content; max-width: calc(100vw - 32px); text-align: center; line-height: 1.4;
 }
 
-/* ── phones ── */
+/* phones */
 .panel.bottom { bottom: calc(16px + env(safe-area-inset-bottom)); }
 @media (max-width: 600px) {
   .panel { padding: 22px 16px; }
@@ -141,7 +141,7 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
   #bank-say { font-size: 56px; }
 }
 
-/* ── prompts + the letter key ── */
+/* prompts, letter key */
 .toggle { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0; color: var(--dim); font-size: 13px; cursor: pointer; }
 .toggle input { accent-color: #ffd27a; width: 16px; height: 16px; }
 .prompt { color: #ffd27a; font-size: 14px; font-style: italic; margin: 0 0 6px; }
@@ -156,16 +156,14 @@ button.round { width: 42px; height: 42px; padding: 0; margin: 0; flex: none; fon
 
 #write-count.near { color: #ffd27a; }
 
-/* ── phones: the page never scrolls, and never changes height when the keyboard opens:
-   it's locked to the screen's height (--app-h, set in main.js) and the keyboard slides over it ── */
+/* Lock the page to --app-h (set in main.js) so the keyboard overlays it instead of resizing it. */
 html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: var(--app-h, 100%); overflow: hidden; overscroll-behavior: none; }
 @media (max-width: 600px) {
   #key { max-width: calc(100vw - 24px); justify-content: center; left: 12px; right: 12px; }
   #status { top: auto; bottom: calc(110px + env(safe-area-inset-bottom)); }
 }
 
-/* Phones: a compact typing bar. While you type it lifts to the upper middle, out of the
-   keyboard's way, so nothing has to chase the keyboard (iPhones report its size too late). */
+/* While typing, the bar moves up out of the keyboard's way; iOS reports the keyboard size too late to follow it. */
 @media (max-width: 600px) {
   #write.panel.bottom, #waiting.panel.bottom { width: calc(100% - 16px); padding: 8px 0 0; }
   #write h2, #waiting h2 { font-size: 13px; margin: 0 0 6px; }
@@ -173,15 +171,13 @@ html, body { position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: v
   #write-hint:not(.show) { display: none; }
   body.composing #write .quiet-text { display: none; }
 }
-body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bottom: auto; } /* a third of the way down: just above the keyboard, even on small iPhones */
+body.composing #write.panel.bottom { top: calc(var(--app-h, 100vh) * 0.34); bottom: auto; }
 #mic.voiced { border-color: #ffd27a; color: #ffd27a; }
 .byline { font-size: 12px; color: var(--dim); margin: -6px 0 14px; }
-/* diary: past entries */
 #diary-past { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; max-height: 30vh; overflow-y: auto; }
 #diary-past button { margin: 0; padding: 7px 14px; font-size: 12px; text-align: left; display: flex; justify-content: space-between; gap: 10px; }
 #diary-past .when { color: var(--ink); white-space: nowrap; }
 #diary-past .first { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* inbox: name + words forms, the list of conversations */
 .fields { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .field { font: inherit; font-size: 16px; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; width: 11em; text-align: center; }
 .field.wide { width: 16.5em; }
@@ -193,10 +189,8 @@ button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decor
 #inbox-list button .what { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #inbox-list button.new { border-color: rgba(111, 182, 255, 0.6); }
 #inbox-list button.new .what { color: #9fd0ff; }
-/* someone wrote back: a little glowing blue dot */
 #inbox-list .dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: #6fb6ff; box-shadow: 0 0 8px #6fb6ff; vertical-align: middle; animation: dotglow 1.6s ease-in-out infinite; }
 @keyframes dotglow { 50% { box-shadow: 0 0 2px #6fb6ff; opacity: 0.7; } }
-/* letters: your conversations on the title screen, and a thread's letters */
 #my-letters { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 #my-letters button { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--dim); border-color: var(--line); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #letter-list button { margin: 3px; padding: 4px 12px; font-size: 12px; }
@@ -206,8 +200,7 @@ button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decor
 .panel .back { position: absolute; top: 10px; left: 10px; margin: 0; padding: 4px 10px; font-size: 13px; }
 #mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
-/* ── game modes ── */
-/* The mode switch: equal slots, and one pill that slides to the chosen one (--i = its slot). */
+/* mode switch: the pill slides to slot --i */
 .modes {
   position: relative; display: grid; grid-template-columns: repeat(5, 1fr);
   width: min(100%, 360px); margin: 0 auto 12px; padding: 3px;
@@ -228,7 +221,7 @@ button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decor
 #party-list { list-style: none; padding: 0; margin: 6px 0 10px; font-size: 13px; }
 #party-list li { margin: 2px 0; }
 
-/* ── jam ── */
+/* jam */
 .big-code { font-size: 56px; letter-spacing: 0.35em; margin: 4px 0 8px 0.35em; }
 #jam-players { list-style: none; padding: 0; margin: 12px 0; font-size: 15px; }
 #jam-players li { margin: 4px 0; }
@@ -255,12 +248,11 @@ button.link { border: none; padding: 0; margin: 0; color: var(--dim); text-decor
 .pad span { font-size: 12px; color: var(--dim); }
 .pad.hit { transform: scale(0.94); background: rgba(255, 255, 255, 0.16); }
 
-/* duet interludes: what each of you said, decoded, fading in as it's heard */
 #interlude-lines { position: fixed; left: 16px; right: 16px; top: calc(14% + env(safe-area-inset-top)); margin: 0; padding: 0; list-style: none; text-align: center; pointer-events: none; z-index: 3; display: flex; flex-direction: column; gap: 10px; }
 #interlude-lines li { font-size: clamp(16px, 3.4vw, 26px); letter-spacing: 0.04em; opacity: 0; transform: translateY(6px); transition: opacity 0.6s, transform 0.6s; text-shadow: 0 0 12px rgba(5, 6, 10, 0.9); }
 #interlude-lines li.on { opacity: 1; transform: none; }
 
-/* dev: the pattern viewer (/?patterns on localhost) */
+/* dev pattern viewer (/?patterns on localhost) */
 #pattern-viewer { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 20; background: rgba(5, 6, 10, 0.8); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; max-height: 38vh; overflow-y: auto; }
 #pattern-viewer p { margin: 0 0 6px; }
 #pattern-viewer div { display: flex; flex-wrap: wrap; gap: 4px; }

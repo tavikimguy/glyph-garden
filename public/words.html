@@ -45,7 +45,6 @@
   <script type="module">
     import { PICTURE_WORDS } from './js/pictures.js';
 
-    // word → the picture it already triggers (if any)
     const pictureFor = {};
     for (const [picture, words] of Object.entries(PICTURE_WORDS)) for (const w of words) pictureFor[w] = picture;
 

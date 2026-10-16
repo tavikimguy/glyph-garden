@@ -1,5 +1,3 @@
-// Shared prompts (a mode the host can turn on): both players get the same
-// question each round, so they talk about the same thing without reading each other.
 
 import { seededRandom } from './glyphs.js';
 
@@ -166,7 +164,7 @@ const PROMPTS = [
   'a thing you’d build if you could',
 ];
 
-// Same seed + round → same prompt on both phones; no repeats within a duet.
+// Same seed and round give the same prompt on both phones, no repeats.
 export function promptFor(seed, round) {
   const rand = seededRandom(seed ^ 0x5eed);
   const order = PROMPTS.map((p) => [rand(), p]).sort((a, b) => a[0] - b[0]).map(([, p]) => p);

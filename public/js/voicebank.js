@@ -1,6 +1,4 @@
-// Voice bank: record ~20 short sounds per player, trim them, find their pitch.
-// (Keys are Korean jamo internally: it's a tidy set of sounds to stitch words from.)
-// Later the singer stitches these clips into any word — your voice, rebuilt.
+// Records ~20 short sounds per player, trims them and detects pitch. Keys are Korean jamo.
 
 const VOWEL_PROMPTS = [
   { key: 'ㅏ', say: 'ah', hint: 'as in "father" — hold it on one steady note', type: 'vowel' },
@@ -12,9 +10,7 @@ const VOWEL_PROMPTS = [
   { key: 'ㅔ', say: 'eh', hint: 'as in "bed" — hold it', type: 'vowel' },
 ];
 
-// Whole syllables: each consonant with ah / ee / uh. Keeping the consonant and
-// vowel in one recording keeps the natural glide between them — that's what
-// makes it sound like a person instead of glued-together pieces.
+// Record consonant + vowel together to keep the natural transition between them.
 const CONSONANTS = [
   ['ㄱ', 'g'], ['ㄴ', 'n'], ['ㄷ', 'd'], ['ㄹ', 'l'], ['ㅁ', 'm'], ['ㅂ', 'b'], ['ㅅ', 's'],
   ['ㅈ', 'j'], ['ㅊ', 'ch'], ['ㅋ', 'k'], ['ㅌ', 't'], ['ㅍ', 'p'], ['ㅎ', 'h'],
@@ -32,7 +28,6 @@ export const PROMPTS = [
     }))),
 ];
 
-// If a sound is missing, guess with a neighbour (lost in translation, on purpose).
 const NEAR = {
   'ㅏ': ['ㅓ', 'ㅔ'], 'ㅓ': ['ㅏ', 'ㅗ', 'ㅡ'], 'ㅗ': ['ㅜ', 'ㅓ'], 'ㅜ': ['ㅗ', 'ㅡ'],
   'ㅡ': ['ㅜ', 'ㅓ'], 'ㅣ': ['ㅔ', 'ㅡ'], 'ㅔ': ['ㅣ', 'ㅏ'],
@@ -50,8 +45,7 @@ export function getClip(bank, key) {
   return null;
 }
 
-// Best recorded whole syllable for consonant + vowel: exact, then a near vowel,
-// then a near consonant. null means "stitch it from pieces instead".
+// Closest recorded syllable (exact, near vowel, then near consonant), or null to stitch from parts.
 export function findSyllable(bank, cho, vowel) {
   if (!bank) return null;
   for (const c of [cho, ...(NEAR[cho] || [])]) {
@@ -62,7 +56,7 @@ export function findSyllable(bank, cho, vowel) {
   return null;
 }
 
-// Just the consonant attack ("g" of "gah"), cut from any syllable starting with it.
+// Consonant attack cut from any syllable starting with it.
 export function findOnset(bank, cho) {
   if (!bank) return null;
   for (const c of [cho, ...(NEAR[cho] || [])]) {
@@ -80,8 +74,7 @@ export async function openMic() {
   });
 }
 
-// Start recording; call the returned stop() to get an AudioBuffer.
-// Start recording; call the returned stop() to get an AudioBuffer (and .blob, the raw file).
+// Returns stop(), which resolves to an AudioBuffer with .blob attached.
 export function startRecording(stream, bitsPerSecond) {
   const recorder = new MediaRecorder(stream, bitsPerSecond ? { audioBitsPerSecond: bitsPerSecond } : undefined);
   const chunks = [];
@@ -95,7 +88,7 @@ export function startRecording(stream, bitsPerSecond) {
             const blob = new Blob(chunks, { type: recorder.mimeType });
             const data = await blob.arrayBuffer();
             const audio = await Tone.getContext().rawContext.decodeAudioData(data);
-            audio.blob = blob; // keep the compressed file too, to send to the other phone
+            audio.blob = blob;
             resolve(audio);
           } catch (err) {
             reject(err);
@@ -133,7 +126,7 @@ function reverseBuffer(buffer) {
   return out;
 }
 
-// Autocorrelation pitch finder: compares the wave with shifted copies of itself.
+// Autocorrelation pitch detection.
 function detectPitch(samples, sampleRate) {
   const size = Math.min(2048, samples.length);
   const start = Math.floor((samples.length - size) / 2);
@@ -150,7 +143,7 @@ function detectPitch(samples, sampleRate) {
   return bestLag ? sampleRate / bestLag : null;
 }
 
-// Raw recording → trimmed, normalised clip (or null if it was silence).
+// Returns null for silence.
 export function processClip(audioBuffer, prompt) {
   const sr = audioBuffer.sampleRate;
   const samples = audioBuffer.getChannelData(0);
@@ -173,19 +166,17 @@ export function processClip(audioBuffer, prompt) {
   let from;
   let to;
   if (prompt.type === 'vowel') {
-    // Keep the steady middle of the vowel; that's the part we loop and pitch.
     const len = end - start;
     from = start + Math.floor(len * 0.15);
     to = end - Math.floor(len * 0.15);
   } else {
-    // Keep the whole syllable, from just before the consonant to the vowel's end.
     from = Math.max(0, start - Math.floor(sr * 0.01));
     to = Math.min(end, start + Math.floor(sr * 0.8));
   }
 
   const buffer = copySegment(samples, from, to, sr);
   const data = buffer.getChannelData(0);
-  // Pitch comes from the vowel: the whole clip, or a syllable's back half.
+  // Pitch from the vowel: whole clip, or back half of a syllable.
   const voiced = prompt.type === 'vowel' ? data : data.subarray(Math.floor(data.length * 0.45));
   return {
     buffer,
@@ -194,16 +185,13 @@ export function processClip(audioBuffer, prompt) {
   };
 }
 
-// Average speaking pitch of a bank, used to pick each player's singing range.
 export function finishBank(clips) {
   const pitches = Object.values(clips).map((c) => c.pitch).filter(Boolean).sort((a, b) => a - b);
   const basePitch = pitches.length ? pitches[Math.floor(pitches.length / 2)] : 180;
   return { clips, basePitch };
 }
 
-// ── a spoken message, ready to be sung ──
-// Trim the silence, cut the recording into one piece per syllable (cutting at the
-// quiet dips between sounds), and find each piece's pitch so it can be tuned.
+// Split a spoken message into syllables at the quiet dips and pitch each one.
 export function prepareSung(audioBuffer, syllableCount) {
   const sr = audioBuffer.sampleRate;
   const raw = audioBuffer.getChannelData(0);
@@ -222,7 +210,6 @@ export function prepareSung(audioBuffer, syllableCount) {
   const buffer = copySegment(raw, first * hop, Math.min(raw.length, (last + 2) * hop), sr);
   const frames = energy.slice(first, last + 2);
 
-  // Smooth the loudness so tiny wobbles don't count as gaps between syllables.
   const smooth = frames.map((_, i) => {
     let sum = 0;
     let n = 0;
@@ -230,7 +217,7 @@ export function prepareSung(audioBuffer, syllableCount) {
     return sum / n;
   });
 
-  // Ideal cuts are evenly spaced; slide each to the quietest moment nearby.
+  // Start from even spacing, then nudge each cut to the nearest quiet point.
   const per = frames.length / syllableCount;
   const cuts = [0];
   for (let k = 1; k < syllableCount; k++) {

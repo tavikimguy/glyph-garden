@@ -1,11 +1,9 @@
-// English text → Korean-style syllable blocks (초성 + 중성 + 종성).
-// This is deliberately rough: English spelling is guessed into Korean sounds,
-// the way loanwords get "lost in translation" (strike → 스트라이크).
+// English text to rough Korean syllable blocks, deliberately lossy (strike: 스트라이크).
 
 const VOWELS = 'aeiou';
-const FINALS = new Set(['ㄱ', 'ㄴ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅇ']); // allowed as 받침
+const FINALS = new Set(['ㄱ', 'ㄴ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅇ']);
 
-// Common words where spelling rules guess badly. Written as real 한글.
+// Words the spelling rules get wrong.
 const EXCEPTIONS = {
   the: '더', a: '어', i: '아이', you: '유', your: '유어', are: '아', what: '왓', we: '위',
   be: '비', me: '미', he: '히', she: '쉬', to: '투', too: '투', do: '두', my: '마이',
@@ -13,7 +11,7 @@ const EXCEPTIONS = {
   they: '데이', hi: '하이', hey: '헤이', ok: '오케이', okay: '오케이', good: '굿', night: '나이트',
 };
 
-// Multi-letter spellings, checked longest first.
+// Checked longest first.
 const PATTERNS = [
   ['tch', ['ㅊ']], ['igh', ['ㅏ', 'ㅣ']], ['ough', ['ㅗ']], ['augh', ['ㅗ']],
   ['sh', ['ㅅ']], ['ch', ['ㅊ']], ['th', ['ㄷ']], ['ph', ['ㅍ']], ['ck', ['ㅋ']],
@@ -25,7 +23,7 @@ const PATTERNS = [
   ['au', ['ㅗ']], ['aw', ['ㅗ']], ['ew', ['ㅠ']], ['ue', ['ㅜ']], ['oa', ['ㅗ']],
 ];
 
-// Vowel + r before a consonant or word end: Korean drops the r (car → 카).
+// Vowel + r before a consonant or word end drops the r (car: 카).
 const R_VOWELS = { ar: 'ㅏ', er: 'ㅓ', ir: 'ㅓ', or: 'ㅗ', ur: 'ㅓ' };
 
 const LETTERS = {
@@ -36,7 +34,6 @@ const LETTERS = {
 
 const VOWEL_JAMO = new Set('ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ');
 
-// Glide + vowel → compound vowel (w + ㅏ → ㅘ, y + ㅏ → ㅑ).
 const W_GLIDE = { 'ㅏ': 'ㅘ', 'ㅐ': 'ㅞ', 'ㅓ': 'ㅝ', 'ㅔ': 'ㅞ', 'ㅣ': 'ㅟ' };
 const Y_GLIDE = { 'ㅏ': 'ㅑ', 'ㅐ': 'ㅒ', 'ㅓ': 'ㅕ', 'ㅔ': 'ㅖ', 'ㅗ': 'ㅛ', 'ㅜ': 'ㅠ', 'ㅣ': 'ㅣ' };
 
@@ -44,10 +41,9 @@ function isVowelLetter(ch) {
   return VOWELS.includes(ch) || ch === 'y';
 }
 
-// One English word → list of jamo / glide tokens.
 function wordToJamo(word) {
   let w = word.toLowerCase().replace(/[^a-z]/g, '');
-  // Silent final e (make → mak), but keep it in short words (be, me).
+  // Silent final e, except in short words (be, me).
   if (w.length > 3 && w.endsWith('e') && !isVowelLetter(w[w.length - 2])) w = w.slice(0, -1);
 
   const out = [];
@@ -56,7 +52,7 @@ function wordToJamo(word) {
     const rest = w.slice(i);
     const next2 = w[i + 2];
 
-    // Doubled consonants: ll splits across syllables (hello → 헬로), others collapse.
+    // ll splits across syllables (hello: 헬로), other doubles collapse.
     if (i > 0 && w[i] === w[i - 1] && !isVowelLetter(w[i])) {
       if (w[i] === 'l') out.push('ㄹ');
       i++; continue;
@@ -81,7 +77,6 @@ function wordToJamo(word) {
   return out;
 }
 
-// Merge glides into the following vowel; a lone glide becomes its own vowel.
 function mergeGlides(tokens) {
   const out = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -102,10 +97,10 @@ function mergeGlides(tokens) {
   return out;
 }
 
-// Jamo tokens → syllable blocks, inserting ㅡ where Korean would (st → 스트).
+// Inserts ㅡ between clustered consonants (st: 스트).
 function toSyllables(tokens) {
   const syls = [];
-  let pending = null; // consonant waiting for its vowel
+  let pending = null;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     const next = tokens[i + 1];
@@ -122,7 +117,7 @@ function toSyllables(tokens) {
       } else {
         if (pending) syls.push({ cho: pending, jung: 'ㅡ', jong: '' });
         pending = null;
-        // ㅈ/ㅊ at the end take ㅣ instead of ㅡ (bench → 벤치).
+        // Final ㅈ/ㅊ take ㅣ instead of ㅡ (bench: 벤치).
         syls.push({ cho: t, jung: t === 'ㅈ' || t === 'ㅊ' ? 'ㅣ' : 'ㅡ', jong: '' });
       }
     }
@@ -131,12 +126,11 @@ function toSyllables(tokens) {
   return syls;
 }
 
-// Unicode Hangul composition, for showing the "sound layer" as real 한글.
 const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
 const JUNG = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
 const JONG = ['', ...'ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ'];
 
-// Tense / double consonants share a glyph and a voice clip with their plain form.
+// Tense consonants share a glyph and voice clip with their plain form.
 const PLAIN = {
   'ㄲ': 'ㄱ', 'ㄸ': 'ㄷ', 'ㅃ': 'ㅂ', 'ㅆ': 'ㅅ', 'ㅉ': 'ㅈ', 'ㄳ': 'ㄱ', 'ㄵ': 'ㄴ', 'ㄶ': 'ㄴ',
   'ㄺ': 'ㄹ', 'ㄻ': 'ㄹ', 'ㄼ': 'ㄹ', 'ㄽ': 'ㄹ', 'ㄾ': 'ㄹ', 'ㄿ': 'ㄹ', 'ㅀ': 'ㄹ', 'ㅄ': 'ㅂ',
@@ -163,8 +157,7 @@ export function compose({ cho, jung, jong }) {
   return String.fromCharCode(0xac00 + (c * 21 + v) * 28 + f);
 }
 
-// Public: message → [{ word, syllables: [{cho, jung, jong, char}] }]
-// English is guessed into Korean sounds; Korean (한글) is used as-is.
+// Returns [{ word, syllables: [{ cho, jung, jong, char }] }]. Hangul input passes through.
 export function translate(text) {
   return text
     .split(/\s+/)

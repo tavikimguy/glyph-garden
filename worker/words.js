@@ -1,9 +1,7 @@
-// The word log: counts meaningful words across every duet, so we know which
-// pictures to draw next. Only single words + counts are kept — never messages.
+// Counts words across all games to decide which pictures to draw next. Stores words and counts only, never messages.
 
 import { DurableObject } from 'cloudflare:workers';
 
-// Filler that would never make a good picture: "the", "and", "lol", "gonna"…
 const STOPWORDS = new Set(`
 a about above after again against all also am an and any are aren't as at be because been before being
 below between both but by can can't cannot could couldn't did didn't do does doesn't doing don't down
@@ -23,22 +21,19 @@ go going went gone come came coming know knew think thought want wanted say said
 see saw look looked feel felt need needed take took give gave way well back good bad new old big little
 `.trim().split(/\s+/));
 
-// Fold simple plurals/verb endings together: stars → star, loves → love, stories → story.
-// (Rough on purpose; good enough to count what people mean.)
+// Rough plural folding (stars -> star, stories -> story).
 function base(word) {
   if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
   if (word.length > 3 && word.endsWith('s') && !/(ss|us|is|ys|ws)$/.test(word)) return word.slice(0, -1);
   return word;
 }
 
-// Words worth counting in one message: lowercase, 3–20 letters, no filler, each once.
 export function wordsWorthCounting(text) {
   const words = String(text).toLowerCase().replace(/[’`]/g, "'").match(/[a-z']+/g) || [];
   return [...new Set(words.map((w) => w.replace(/^'+|'+$/g, '')).filter((w) => !STOPWORDS.has(w) && !STOPWORDS.has(w.replace(/'/g, ''))).map(base))]
     .filter((w) => w.length >= 3 && w.length <= 20 && !STOPWORDS.has(w));
 }
 
-// One global log for the whole game (a single Durable Object with a tiny SQL table).
 export class WordLog extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -62,7 +57,7 @@ export class WordLog extends DurableObject {
     }
   }
 
-  // The most-used words. minCount hides one-offs (names, private words).
+  // minCount hides one-offs like names.
   top(limit = 200, minCount = 2) {
     return this.ctx.storage.sql
       .exec('SELECT word, count, last_seen FROM words WHERE count >= ? ORDER BY count DESC, word LIMIT ?', minCount, limit)

@@ -1,12 +1,9 @@
-// Picture dances: the glyphs line up along the outline of a little drawing
-// (a fish, a bird, a flower…) that moves like the real thing.
-// Drawings live in a -1…1 box (y points down); glyphs spread evenly along the lines.
+// Glyphs line up along an animated drawing. Coordinates are in a -1..1 box, y down.
 
 const TAU = Math.PI * 2;
 const between = (rand, a, b) => a + rand() * (b - a);
 const dir = (rand) => (rand() < 0.5 ? -1 : 1);
 
-// ── tiny drawing kit ──
 function arc(cx, cy, rx, ry, from = 0, to = TAU, steps = 28) {
   const pts = [];
   for (let i = 0; i <= steps; i++) {
@@ -26,8 +23,7 @@ function polar(fn, steps = 80) {
   return pts;
 }
 
-// Turn strokes (lists of points) into something we can sample by distance.
-// colors (optional): an [r, g, b] for each stroke (null = the player's own colour).
+// Strokes to a sampler by distance. colors: optional [r, g, b] per stroke, null = player colour.
 function shape(strokes, colors = []) {
   const segs = [];
   let total = 0;
@@ -43,7 +39,6 @@ function shape(strokes, colors = []) {
   return { segs, total };
 }
 
-// The point a fraction f (0…1) of the way along all the lines.
 function pointAt({ segs, total }, f) {
   const d = f * total;
   let lo = 0;
@@ -59,14 +54,11 @@ function pointAt({ segs, total }, f) {
 }
 
 const line = (...pts) => pts;
-// a little zig-zag "Z"
 const zed = (x, y, w) => [[x, y], [x + w, y], [x, y + w], [x + w, y + w]];
-// a small flower of petals (for shaymin's ear)
 const petals = (cx, cy, r) => polar((a) => r * (0.55 + 0.45 * Math.abs(Math.cos(a * 2.5))), 40).map(([x, y]) => [x + cx, y + cy]);
 
-// Rotate a stroke by angle a (to tilt a whole drawing).
 const tilt = (pts, a) => pts.map(([x, y]) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]);
-// A spiky, leafy outline through the given points: each stretch gets a tuft poking outward from (cx, cy).
+// Spiky outline: each segment gets a tuft pointing away from (cx, cy).
 function tufts(pts, cx, cy, spike = 0.12) {
   const out = [];
   for (let i = 0; i < pts.length - 1; i++) {
@@ -80,8 +72,7 @@ function tufts(pts, cx, cy, spike = 0.12) {
   return out;
 }
 
-// A lumpy outline through the given points: each stretch bulges outward (away from cx, cy)
-// in a round bump, like a bush or a cloud.
+// Lumpy outline: each segment bulges away from (cx, cy).
 function bumps(pts, cx, cy, height = 0.6) {
   const out = [];
   for (let i = 0; i < pts.length - 1; i++) {
@@ -90,7 +81,7 @@ function bumps(pts, cx, cy, height = 0.6) {
     const len = Math.hypot(bx - ax, by - ay);
     let [nx, ny] = [-(by - ay) / len, (bx - ax) / len];
     const [mx, my] = [(ax + bx) / 2, (ay + by) / 2];
-    if (nx * (mx - cx) + ny * (my - cy) < 0) [nx, ny] = [-nx, -ny]; // point the bump outward
+    if (nx * (mx - cx) + ny * (my - cy) < 0) [nx, ny] = [-nx, -ny];
     for (let k = 0; k < 6; k++) {
       const f = k / 6;
       const h = Math.sin(f * Math.PI) * height * (len / 2);
@@ -101,18 +92,16 @@ function bumps(pts, cx, cy, height = 0.6) {
   return out;
 }
 
-// A flower: n round petals around (cx, cy), each its own little loop.
 const flower = (cx, cy, r, n = 5) => Array.from({ length: n }, (_, k) => {
   const a = -Math.PI / 2 + (k / n) * TAU;
   const [px, py] = [cx + Math.cos(a) * r * 0.55, cy + Math.sin(a) * r * 0.55];
   return Array.from({ length: 11 }, (_, i) => {
     const b = (i / 10) * TAU;
-    const [u, v] = [Math.cos(b) * r * 0.48, Math.sin(b) * r * 0.3]; // along the petal, across it
+    const [u, v] = [Math.cos(b) * r * 0.48, Math.sin(b) * r * 0.3];
     return [px + u * Math.cos(a) - v * Math.sin(a), py + u * Math.sin(a) + v * Math.cos(a)];
   });
 });
 
-// Colours a picture can paint itself in.
 const C = {
   yellow: [255, 222, 70], orange: [255, 150, 50], red: [255, 80, 80], green: [110, 215, 105],
   olive: [150, 185, 70], leaf: [90, 190, 90], brown: [190, 130, 80], tan: [235, 195, 140],
@@ -121,7 +110,6 @@ const C = {
   wine: [200, 40, 90], silver: [200, 210, 225], grey: [160, 165, 180], darkleaf: [60, 150, 75], meat: [160, 95, 60],
 };
 
-// ── the drawings ──
 const STAR = [];
 for (let i = 0; i <= 10; i++) {
   const a = -Math.PI / 2 + (i * Math.PI) / 5;
@@ -134,7 +122,7 @@ const DRAWINGS = {
     arc(-0.15, 0, 0.6, 0.36),
     [[0.42, 0], [0.92, -0.38], [0.85, 0], [0.92, 0.38], [0.42, 0]],
     arc(-0.5, -0.08, 0.06, 0.06, 0, TAU, 10),
-    arc(-0.05, 0, 0.12, 0.25, -1.2, 1.2, 10), // gill
+    arc(-0.05, 0, 0.12, 0.25, -1.2, 1.2, 10),
   ]),
   bird: shape([
     arc(-0.45, 0.05, 0.45, 0.35, Math.PI * 1.05, Math.PI * 1.95, 18),
@@ -243,7 +231,7 @@ const DRAWINGS = {
     arc(-0.25, -0.25, 0.12, 0.12, 0, TAU, 10), arc(0.22, -0.3, 0.12, 0.12, 0, TAU, 10), arc(0, 0.25, 0.11, 0.11, 0, TAU, 10),
   ], [C.yellow, C.brown, C.brown, C.red, C.red, C.red]),
   football: shape([
-    (() => { // a football: two arcs that meet in points
+    (() => {
       const r = Math.hypot(0.92, 0.55);
       const from = Math.atan2(-0.55, -0.92);
       const to = Math.atan2(-0.55, 0.92);
@@ -286,23 +274,21 @@ const DRAWINGS = {
     line([0.7, -0.3], [0.75, -0.15], [0.7, -0.08], [0.65, -0.15], [0.7, -0.3]),
   ], [C.orange, C.ink, C.ink, C.ink, C.orange, C.cream, C.orange, C.orange, C.orange, C.orange, C.orange, C.red, C.yellow]),
   shaymin: (() => {
-    // Drawn level, then the whole body tilts 30° so the head end is higher.
+    // Drawn level, then tilted 30 degrees.
     const lean = (pts) => tilt(pts, Math.PI / 6);
     const body = [
-      // white hedgehog body: from where the green back starts, down the face to a little
-      // pointed snout, under the chin, along the belly, and up to the back of the green
       line([-0.52, 0.18], [-0.64, 0.24], [-0.75, 0.27], [-0.83, 0.3], [-0.87, 0.34], [-0.85, 0.38], [-0.78, 0.41], [-0.68, 0.45], [-0.56, 0.52], [-0.3, 0.58], [0.2, 0.58], [0.52, 0.46], [0.72, 0.22]),
-      bumps(Array.from({ length: 8 }, (_, k) => { // the bushy green back, in round lumps
+      bumps(Array.from({ length: 8 }, (_, k) => {
         const a = Math.PI * (1.02 + (k / 7) * 0.96);
         return [0.1 + Math.cos(a) * 0.6, 0.2 + Math.sin(a) * 0.5];
       }), 0.1, 0.2, 0.9),
-      // the flower, on its side (inside the body, so it doesn't sit on the outline's glyphs)
+      // inside the body so it doesn't overlap the outline glyphs
       ...flower(-0.08, 0.12, 0.3),
       arc(-0.08, 0.12, 0.045, 0.045, 0, TAU, 6),
-      arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8), // eye
-      arc(-0.86, 0.34, 0.03, 0.03, 0, TAU, 6), // nose
+      arc(-0.58, 0.29, 0.04, 0.06, 0, TAU, 8),
+      arc(-0.86, 0.34, 0.03, 0.03, 0, TAU, 6),
     ].map(lean);
-    // four little legs, straight down to one ground line (so the back ones are shorter)
+    // legs end on one ground line, so the back ones are shorter
     const tops = [-0.38, -0.14, 0.14, 0.38].map((x) => lean([[x, 0.58]])[0]);
     const ground = Math.max(...tops.map(([, y]) => y)) + 0.12;
     const legs = tops.map(([x, y]) => [[x, y], [x, ground]]);
@@ -376,7 +362,7 @@ const DRAWINGS = {
   ]),
 };
 
-// How each drawing moves. (x, y) is a point of the drawing; return where it goes now.
+// (x, y) is a point on the drawing; return its position at time t.
 const MOTION = {
   fish: (x, y, t, v) => {
     const wag = x > 0.4 ? Math.sin(t * 7) * 0.18 * (x - 0.4) : 0;
@@ -385,7 +371,7 @@ const MOTION = {
   bird: (x, y, t) => [x + Math.sin(t * 0.5) * 0.3, y + Math.sin(t * 4.5) * 0.4 * Math.abs(x) - Math.sin(t * 0.8) * 0.15],
   butterfly: (x, y, t) => [x * (0.35 + 0.65 * Math.abs(Math.cos(t * 3))), y + Math.sin(t * 1.1) * 0.12],
   flower: (x, y, t) => {
-    if (y > 0.15) return [x + Math.sin(t * 1.2) * 0.05 * (1 - y), y]; // the stem sways
+    if (y > 0.15) return [x + Math.sin(t * 1.2) * 0.05 * (1 - y), y];
     const a = t * 0.4;
     const dy = y + 0.3;
     return [x * Math.cos(a) - dy * Math.sin(a), x * Math.sin(a) + dy * Math.cos(a) - 0.3];
@@ -416,16 +402,16 @@ const MOTION = {
     const tilt = Math.sin(t * 2) * 0.15;
     return [x * Math.cos(tilt) - y * Math.sin(tilt) + Math.sin(t * 1.1) * 0.1, x * Math.sin(tilt) + y * Math.cos(tilt) - Math.abs(Math.sin(t * 2.2)) * 0.1];
   },
-  turtle: (x, y, t) => [x + Math.sin(t * 0.3) * 0.3, y + (y > 0.2 ? Math.sin(t * 3 + x * 4) * 0.04 : 0)], // slow walk, paddling legs
-  dino: (x, y, t) => (x > 0.25 && y < 0.1 ? [x + Math.sin(t * 1.2) * 0.12 * (0.1 - y), y] : [x + Math.sin(t * 0.4) * 0.15, y]), // the long neck sways
+  turtle: (x, y, t) => [x + Math.sin(t * 0.3) * 0.3, y + (y > 0.2 ? Math.sin(t * 3 + x * 4) * 0.04 : 0)],
+  dino: (x, y, t) => (x > 0.25 && y < 0.1 ? [x + Math.sin(t * 1.2) * 0.12 * (0.1 - y), y] : [x + Math.sin(t * 0.4) * 0.15, y]),
   olive: (x, y, t) => {
     const a = Math.sin(t * 0.8) * 0.3;
     return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
   },
-  pizza: (x, y, t) => [x, y + (y > 0.3 ? Math.sin(t * 2) * 0.08 * y : 0) + Math.sin(t * 1.3) * 0.05], // the cheesy tip droops
+  pizza: (x, y, t) => [x, y + (y > 0.3 ? Math.sin(t * 2) * 0.08 * y : 0) + Math.sin(t * 1.3) * 0.05],
   football: (x, y, t) => {
-    const a = -0.35 + Math.sin(t * 3) * 0.08; // nose up, wobbling as it flies
-    const yy = y * (0.9 + Math.cos(t * 5) * 0.1); // a hint of spin, never squashed flat
+    const a = -0.35 + Math.sin(t * 3) * 0.08;
+    const yy = y * (0.9 + Math.cos(t * 5) * 0.1);
     return [x * Math.cos(a) - yy * Math.sin(a) + Math.sin(t * 0.5) * 0.3, x * Math.sin(a) + yy * Math.cos(a) - Math.sin(t * 0.5 + 1) * 0.1];
   },
   baseball: (x, y, t) => {
@@ -433,20 +419,20 @@ const MOTION = {
     return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a) - Math.abs(Math.sin(t * 1.5)) * 0.2];
   },
   videogames: (x, y, t) => {
-    const a = Math.sin(t * 5) * 0.06; // button mashing
+    const a = Math.sin(t * 5) * 0.06;
     return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
   },
   pikachu: (x, y, t) => [x + (y < -0.2 ? Math.sin(t * 6) * 0.04 : 0), y - Math.abs(Math.sin(t * 2.5)) * 0.12],
   charmander: (x, y, t) => {
-    if (x > 0.56 && y < 0) return [x + Math.sin(t * 9 + y * 10) * 0.04, y * (1 + Math.sin(t * 11) * 0.12)]; // the tail flame flickers
+    if (x > 0.56 && y < 0) return [x + Math.sin(t * 9 + y * 10) * 0.04, y * (1 + Math.sin(t * 11) * 0.12)];
     return [x + Math.sin(t * 1.2) * 0.05, y];
   },
   shaymin: (x, y, t) => {
-    const step = y > 0.55 && x < 0.4 ? Math.sin(t * 6 + x * 9) * 0.04 : 0; // little legs trot
+    const step = y > 0.55 && x < 0.4 ? Math.sin(t * 6 + x * 9) * 0.04 : 0;
     return [x + Math.sin(t * 0.7) * 0.15 + step, y - Math.abs(Math.sin(t * 1.8)) * 0.06];
   },
   dog: (x, y, t) => {
-    const ear = Math.abs(x) > 0.4 ? Math.sin(t * 6) * 0.06 : 0; // floppy ears flap
+    const ear = Math.abs(x) > 0.4 ? Math.sin(t * 6) * 0.06 : 0;
     const tilt = Math.sin(t * 1.1) * 0.12;
     return [x * Math.cos(tilt) - y * Math.sin(tilt), x * Math.sin(tilt) + y * Math.cos(tilt) + ear];
   },
@@ -455,13 +441,13 @@ const MOTION = {
     return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
   },
   beer: (x, y, t) => {
-    const a = Math.max(0, Math.sin(t * 0.9)) * 0.25; // cheers!
+    const a = Math.max(0, Math.sin(t * 0.9)) * 0.25;
     return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a) - (y < -0.4 ? Math.abs(Math.sin(t * 3 + x * 5)) * 0.04 : 0)];
   },
-  wine: (x, y, t) => [x + (y < -0.2 && y > -0.45 ? Math.sin(t * 3 + x * 3) * 0.04 : 0), y + Math.sin(t * 0.8) * 0.04], // a swirl
+  wine: (x, y, t) => [x + (y < -0.2 && y > -0.45 ? Math.sin(t * 3 + x * 3) * 0.04 : 0), y + Math.sin(t * 0.8) * 0.04],
   beach: (x, y, t) => {
-    if (y > 0.7) return [x + Math.sin(t * 1.2) * 0.08, y]; // the waves roll
-    if (y < -0.2 && x > -0.4) return [x + Math.sin(t * 1.4) * 0.06 * (0.4 - y), y]; // the palm sways
+    if (y > 0.7) return [x + Math.sin(t * 1.2) * 0.08, y];
+    if (y < -0.2 && x > -0.4) return [x + Math.sin(t * 1.4) * 0.06 * (0.4 - y), y];
     return [x, y];
   },
   mountain: (x, y, t) => [x + Math.sin(t * 0.3) * 0.05, y + Math.sin(t * 0.5) * 0.03],
@@ -469,18 +455,18 @@ const MOTION = {
     const a = t * 0.4;
     return [x * Math.cos(a) - y * Math.sin(a) + Math.sin(t * 0.6) * 0.15, x * Math.sin(a) + y * Math.cos(a) + Math.sin(t * 0.3) * 0.1];
   },
-  sleepy: (x, y, t) => (x < 0.25 || y < 0 ? [x + Math.sin(t + y * 3) * 0.04, y - ((t * 0.15) % 0.3)] : [x, y + Math.sin(t * 0.6) * 0.03]), // the Zs float up
+  sleepy: (x, y, t) => (x < 0.25 || y < 0 ? [x + Math.sin(t + y * 3) * 0.04, y - ((t * 0.15) % 0.3)] : [x, y + Math.sin(t * 0.6) * 0.03]),
   halloween: (x, y, t) => {
     const flicker = 1 + Math.sin(t * 8) * Math.sin(t * 3.1) * 0.05;
     return [x * flicker, y * flicker + Math.sin(t * 1.5) * 0.05];
   },
   tree: (x, y, t) => [x + Math.sin(t * 1.3) * 0.08 * Math.max(0, 0.5 - y), y],
-  frog: (x, y, t) => [x, y - Math.abs(Math.sin(t * 2.5)) * 0.3], // hop hop
+  frog: (x, y, t) => [x, y - Math.abs(Math.sin(t * 2.5)) * 0.3],
   cloud: (x, y, t) => [x + Math.sin(t * 0.4) * 0.3, y + Math.sin(t * 0.9) * 0.04],
-  rain: (x, y, t) => (y > -0.1 ? [x, -0.1 + ((y + 0.1 + t * 0.6) % 1)] : [x + Math.sin(t * 0.5) * 0.05, y]), // drops fall and loop
+  rain: (x, y, t) => (y > -0.1 ? [x, -0.1 + ((y + 0.1 + t * 0.6) % 1)] : [x + Math.sin(t * 0.5) * 0.05, y]),
 };
 
-// A picture only appears once one of its words has been said in the conversation.
+// A picture is only eligible once one of its words has come up.
 export const PICTURE_WORDS = {
   fish: ['fish', 'fishes', 'fishing'],
   bird: ['bird', 'birds', 'fly', 'flying', 'wings'],
@@ -524,7 +510,7 @@ export const PICTURES = Object.fromEntries(Object.keys(DRAWINGS).map((name) => [
   setup: (rand) => ({ dir: dir(rand), size: between(rand, 1, 1.2), flip: rand() < 0.5 ? -1 : 1 }),
   at: (g, t, c, v) => {
     const [px, py, paint] = pointAt(DRAWINGS[name], (g.fi + 0.5) / c.n);
-    g.paint = paint; // some pictures paint their parts (a green olive, its red pit)
+    g.paint = paint;
     const [x, y] = MOTION[name](px, py, t, v);
     const s = c.R * v.size;
     return [c.cx + x * s * (name === 'fish' ? v.flip : 1), c.cy + y * s];

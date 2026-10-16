@@ -41,7 +41,7 @@
       <div id="diary-past"></div>
     </div>
     <div id="mode-letter" hidden>
-      <!-- not signed in: make an inbox (a name + 4 secret words), or open yours on this phone -->
+      <!-- signed out -->
       <div id="inbox-out">
         <form id="claim-form" class="row fields">
           <input id="claim-name" class="field" maxlength="17" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="pick a name">
@@ -56,7 +56,7 @@
         </form>
         <button id="letter-write" class="quiet">or just write a letter (send it as a link)</button>
       </div>
-      <!-- signed in: your inbox -->
+      <!-- signed in -->
       <div id="inbox-in" hidden>
         <p class="quiet-text">you're <b id="me-handle"></b> · <button id="show-phrase" class="link" type="button">my secret word</button> · <button id="sign-out" class="link" type="button">sign out</button></p>
         <form id="letter-to-form" class="row fields">
@@ -155,7 +155,7 @@
   </div>
   <p id="jam-lyric" hidden></p>
 
-  <!-- jam: your phone -->
+  <!-- jam: phone -->
   <section id="jam-setup" class="panel" hidden>
     <p class="mode">jam</p>
     <h2 id="jam-you">pick 4 symbols</h2>
@@ -197,7 +197,7 @@
 
   <ol id="interlude-lines" hidden></ol>
 
-  <!-- a letter link: open it to hear their song -->
+  <!-- letter link -->
   <section id="letter-open" class="panel" hidden>
     <button id="letter-home" class="quiet back">← home</button>
     <p class="mode">letter</p>

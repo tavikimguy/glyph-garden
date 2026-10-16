@@ -1,14 +1,10 @@
-// Online duet: a live connection (WebSocket) to the room on the server.
-// The room keeps the messages, so a phone that drops out can rejoin and catch up.
-
-const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I/L mix-ups
+const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
 
 export function newCode() {
   return Array.from({ length: 4 }, () => CODE_LETTERS[Math.floor(Math.random() * CODE_LETTERS.length)]).join('');
 }
 
-// A stable id for this tab, so a reload gets the same seat back
-// (per tab, so two tabs on one device count as two people).
+// Per tab, not per device, so two tabs can play each other.
 function clientId() {
   try {
     let id = sessionStorage.getItem('glyph-garden-id');
@@ -22,10 +18,7 @@ function clientId() {
   }
 }
 
-// handlers.message(msg) gets every message from the room;
-// handlers.status('connected' | 'reconnecting' | 'full') reports the connection.
-// mode = 'duet' · 'party' · 'jam' — only used if this is a brand-new room.
-// role = 'screen' for a jam's shared screen (it watches; it isn't a player).
+// mode only matters if the room is new.
 export function connect(code, handlers, mode = 'duet', role = '') {
   const id = clientId();
   let ws = null;
@@ -46,7 +39,7 @@ export function connect(code, handlers, mode = 'duet', role = '') {
       if (stopped) return;
       if (e.code === 4000) return handlers.status('full');
       handlers.status('reconnecting');
-      setTimeout(open, Math.min(5000, 500 * 2 ** retries++)); // try again, waiting a bit longer each time
+      setTimeout(open, Math.min(5000, 500 * 2 ** retries++));
     };
   };
   open();
